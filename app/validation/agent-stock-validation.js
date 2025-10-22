@@ -1,4 +1,4 @@
-import Joi from "joi";
+const Joi=require("joi");
 
 const agentStockValidation = Joi.object({
     agentId:Joi.string().hex().length(24).required(),

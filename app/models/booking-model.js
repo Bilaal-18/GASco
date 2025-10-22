@@ -1,9 +1,9 @@
 const mongoose = require('mongoose');
-const bookingSchema = new mongoose.model({
+const bookingSchema = new mongoose.Schema({
     customer:{type:mongoose.Schema.Types.ObjectId, ref :"user", required:true},
-    distirbutor:{type:mongoose.Schema.Types.ObjectId, ref :"distributor", required: true},
+    agent:{type:mongoose.Schema.Types.ObjectId, ref :"user", required: true},
     cylinder:{type:mongoose.Schema.Types.ObjectId,ref :"cylinder", required:true},
-    quantity:{type:Number,required:true},
+    quantity:{type:Number,required:true,min:1},
     status:{
         type:String,
         enum:["pending","confirmed","delivered","cancelled"],

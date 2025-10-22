@@ -2,62 +2,70 @@ const user = require('../models/user-model');
 const {userSchema,agentSchema,adminSchema,userLoginSchema} = require('../validation/user-validation');
 const bcryptjs= require("bcryptjs");
 const jwt = require('jsonwebtoken');
-
-
+const axios = require('axios');
 const userCtrl={};
 
 //! <-------------------- REGISTER --------------------> !\\
 
-userCtrl.register = async (req,res) => {
-    const body= req.body;
-    let validationSchema;
-    if(body.role == "customer") validationSchema = userSchema;
-    else if(body.role == "agent") validationSchema = agentSchema;
-    else if(body.role == "admin") validationSchema = adminSchema;
-    else return res.status(400).json({message:"Invalid role"});
-    
-    const {error, value} = validationSchema.validate(body,{
-        abortEarly: false
-    });
-    if(error) return res.status(400).json({ error:error.details });
+userCtrl.register = async (req, res) => {
+  const body = req.body;
+  let validationSchema;
 
-    if(value.role == "admin" ) {
-        const existingAdmin = await user.findOne({role:"admin"}); 
-    
-    if(existingAdmin){
-        return res.status(400).json({error:"admin already exists"});
-    }
-    }
-    const userByEmail = await user.findOne({ email: value.email });
-    if(userByEmail){
-        return res.status(400).json({error: "email already taken "});
-    }
+  if (body.role == "customer") validationSchema = userSchema;
+  else if (body.role == "agent") validationSchema = agentSchema;
+  else if (body.role == "admin") validationSchema = adminSchema;
+  else return res.status(400).json({ message: "Invalid role" });
 
-    // if(value.role == "customer"){
-    //     const distributor = await user.findOne({_id:value.agent,role:"agent"})
-    //     if(!distributor){
-    //         return res.status(400).json({error:"agent not found"})
-    //     }
-    // }
+  const { error, value } = validationSchema.validate(body, { abortEarly: false });
+  if (error) return res.status(400).json({ error: error.details });
 
-    try {
-       
+  if (value.role === "admin") {
+    const existingAdmin = await user.findOne({ role: "admin" });
+    if (existingAdmin) return res.status(400).json({ error: "Admin already exists" });
+  }
 
-        const User = new user(value);
-        const salt = await bcryptjs.genSalt();
-        const hash = await bcryptjs.hash(value.password,salt);
-        User.password= hash;
-        
-        await User.save();
-        res.status(201).json(User); 
+  const userByEmail = await user.findOne({ email: value.email });
+  if (userByEmail) return res.status(400).json({ error: "Email already taken" });
 
-      
-    }catch(err){
-        console.log(err);
-        res.status(500).json({error : "something went wrong!!!"});
-    }
+  try {
+   
+   const fullAddress = `${value.address.street}, ${value.address.city}, ${value.address.state}, ${value.address.pincode}`;
+
+
+const geoResponse = await axios.get("https://geocode.maps.co/search", {
+  params: {
+    q: fullAddress,
+    api_key: process.env.MAP_API_KEY
+  }
+});
+
+if (!geoResponse.data || geoResponse.data.length === 0) {
+  return res.status(400).json({ error: "Unable to geocode address" });
+}
+
+const { lat, lon } = geoResponse.data[0];
+
+const newUser = new user({
+  ...value,
+  location: {
+    type: "Point",
+    coordinates: [parseFloat(lon), parseFloat(lat)] 
+  }
+});
+
+    const salt = await bcryptjs.genSalt();
+    newUser.password = await bcryptjs.hash(value.password, salt);
+
+    await newUser.save();
+
+    res.status(201).json({ message: "User registered successfully", user: newUser });
+
+  } catch (err) {
+    console.error("Error during registration:", err.message);
+    res.status(500).json({ error: "Something went wrong during registration" });
+  }
 };
- module.exports = userCtrl;
+
 
  //! <-------------------- LOGIN --------------------> !\\
 

@@ -1,14 +1,22 @@
 const inventary = require("../models/inventary-model");
 const agentStock = require("../models/agent-stock-model"); 
 const cylinder = require("../models/cylinder-model");
-
+const agentStockValidation = require("../validation/agent-stock-validation");
 
 const agentStockCtrl = {};
 
 //! <--------------------ADD AGENT STOCK-------------------> !\\
 
 agentStockCtrl.addStock = async(req,res) => {
-    const {cylinderId,agentId,quantity} = req.body;
+    const body = req.body;
+
+    const {error,value} = agentStockValidation.validate(body,{abortEarly:false});
+    if(error){
+      return res.status(404).json({error:"validation failed"});
+    }
+
+    const {cylinderId,agentId,quantity} = value;
+    
     try{
         const Inventary = await inventary.findOne({cylinderId});
         if(!Inventary || Inventary.totalQuantity < quantity ){
@@ -40,7 +48,6 @@ agentStockCtrl.addStock = async(req,res) => {
 
 agentStockCtrl.OwnStock = async(req,res) =>{
   const {agentId} = req.params;
-  
   try{
   
     const Ownstock = await agentStock.find(agentId).populate("cylinderId","cylinderType weight price");
@@ -87,14 +94,10 @@ agentStockCtrl.ListAll = async(req,res) => {
 //! <--------------------UPDATE STOCK-------------------> !\\
 
 agentStockCtrl.updateStock = async (req, res) => {
-  try {
     const { agentId } = req.params;
-    const { cylinderId, quantity } = req.body;
+    const {cylinderId,quantity}= req.body;
 
-    if (!agentId || !cylinderId || quantity === undefined) {
-      return res.status(400).json({ error: "agentId, cylinderId, and quantity are required" });
-    }
-
+  try {
     const stock = await agentStock.findOne({ agentId, cylinderId });
     if (!stock) {
       return res.status(404).json({ error: "Agent stock not found" });

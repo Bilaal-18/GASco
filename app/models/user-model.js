@@ -17,12 +17,12 @@ const userSchema = new mongoose.Schema({
     type: {
       type: String,
       enum: ["Point"],
-      default:undefined
+      default:"Point"
     },
     coordinates: {
       type: [Number],
-      //required:true,
-      default:undefined
+      required:true,
+      index:"2dSphere"
     }
   },
   password: { type: String, required: true },
