@@ -86,8 +86,6 @@ agentStockCtrl.ListAll = async(req,res) => {
 
 //! <--------------------UPDATE STOCK-------------------> !\\
 
-
-
 agentStockCtrl.updateStock = async (req, res) => {
   try {
     const { agentId } = req.params;
@@ -97,28 +95,23 @@ agentStockCtrl.updateStock = async (req, res) => {
       return res.status(400).json({ error: "agentId, cylinderId, and quantity are required" });
     }
 
-    // Find the agent's stock
     const stock = await agentStock.findOne({ agentId, cylinderId });
     if (!stock) {
       return res.status(404).json({ error: "Agent stock not found" });
     }
 
-    // Find main inventory entry
     const mainInventory = await inventary.findOne({ cylinderId });
     if (!mainInventory) {
       return res.status(404).json({ error: "Cylinder not found in main inventory" });
     }
 
-    // Calculate difference
     const diff = quantity - stock.quantity;
 
-    // Update agent stock
     stock.quantity = quantity;
     await stock.save();
 
-    // Reflect changes in main inventory
-    mainInventory.totalQuantity -= diff; // if agent gains, admin loses, and vice versa
-    if (mainInventory.totalQuantity < 0) mainInventory.totalQuantity = 0; // avoid negative
+    mainInventory.totalQuantity -= diff;
+    if (mainInventory.totalQuantity < 0) mainInventory.totalQuantity = 0;
     mainInventory.updatedAt = Date.now();
     await mainInventory.save();
 
@@ -144,7 +137,6 @@ agentStockCtrl.deleteStock = async (req, res) => {
       return res.status(404).json({ error: "Agent stock not found" });
     }
 
-    // Restore deleted quantity to main inventory
     const mainInventory = await inventary.findOne({ cylinderId });
     if (mainInventory) {
       mainInventory.totalQuantity += stock.quantity;
@@ -157,6 +149,7 @@ agentStockCtrl.deleteStock = async (req, res) => {
       restoredQuantity: stock.quantity,
       updatedInventory: mainInventory,
     });
+    
   } catch (err) {
     console.error("Error deleting agent stock:", err);
     res.status(500).json({ error: "Internal server error" });
