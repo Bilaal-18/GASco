@@ -34,7 +34,7 @@ inventaryCtrl.addStock = async(req,res) => {
 
 inventaryCtrl.all = async (req,res) => {
     try{
-        const Inventary = await inventary.find().populate("cylinderId","cylinderType weight price totalQuantity");
+        const Inventary = await inventary.find().populate("cylinderId","cylinderName cylinderType weight price totalQuantity");
         if(!Inventary){
             return res.status(404).json({error:"Inventary Not Available"})
         }

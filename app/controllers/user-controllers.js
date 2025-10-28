@@ -19,6 +19,8 @@ userCtrl.register = async (req, res) => {
   const { error, value } = validationSchema.validate(body, { abortEarly: false });
   if (error) return res.status(400).json({ error: error.details });
 
+  try{
+
   if (value.role === "admin") {
     const existingAdmin = await user.findOne({ role: "admin" });
     if (existingAdmin) return res.status(400).json({ error: "Admin already exists" });
@@ -27,41 +29,53 @@ userCtrl.register = async (req, res) => {
   const userByEmail = await user.findOne({ email: value.email });
   if (userByEmail) return res.status(400).json({ error: "Email already taken" });
 
-  try {
-   
-   const fullAddress = `${value.address.street}, ${value.address.city}, ${value.address.state}, ${value.address.pincode}`;
+  let newUserData = {...value}
+
+    if(value.role == "customer"){
+        if(!value.agent){
+            return res.status(400).json({error:"agent should be assigned to customer"})
+        }
+
+    const assignedAgent = await user.findOne({ _id: value.agent, role: "agent" });
+
+      if (!assignedAgent) {
+        return res.status(400).json({ error: "Invalid or non-existent agent ID" });
+      }
+
+        const fullAddress = `${value.address.street}, ${value.address.city}, ${value.address.state}, ${value.address.pincode}`;
 
 
-const geoResponse = await axios.get("https://geocode.maps.co/search", {
-  params: {
-    q: fullAddress,
-    api_key: process.env.MAP_API_KEY
-  }
-});
+    const geoResponse = await axios.get("https://geocode.maps.co/search", {
+    params: {
+        q: fullAddress,
+        api_key:process.env.API_KEY
+    }
+    });
+    console.log(geoResponse);
 
-if (!geoResponse.data || geoResponse.data.length === 0) {
-  return res.status(400).json({ error: "Unable to geocode address" });
-}
+    if (!geoResponse.data || geoResponse.data.length === 0) {
+    return res.status(400).json({ error: "Unable to geocode address" });
+    }
 
-const { lat, lon } = geoResponse.data[0];
+    const { lat, lon } = geoResponse.data[0];
 
-const newUser = new user({
-  ...value,
-  location: {
-    type: "Point",
-    coordinates: [parseFloat(lon), parseFloat(lat)] 
-  }
-});
-
+    newUserData.location= {
+        ...value,
+        type: "Point",
+        coordinates: [parseFloat(lon), parseFloat(lat)] 
+    }
+        newUserData.agent = assignedAgent._id;
+    } 
     const salt = await bcryptjs.genSalt();
-    newUser.password = await bcryptjs.hash(value.password, salt);
+    newUserData.password = await bcryptjs.hash(value.password, salt);
 
+    const newUser =new user(newUserData)
     await newUser.save();
 
-    res.status(201).json({ message: "User registered successfully", user: newUser });
+    res.status(201).json({ message: "User registered successfully", user: newUser});
 
   } catch (err) {
-    console.error("Error during registration:", err.message);
+    console.error("Error during registration:", err);
     res.status(500).json({ error: "Something went wrong during registration" });
   }
 };
@@ -89,7 +103,7 @@ const newUser = new user({
             UserId :User._id,
             role:User.role
         };
-        const token = jwt.sign(tokenData,process.env.Jwt_SECRET,{
+        const token = jwt.sign(tokenData,process.env.JWT_SECRET,{
             expiresIn:"1d",
         });
         res.status(201).json({

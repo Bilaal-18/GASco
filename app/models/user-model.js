@@ -20,9 +20,7 @@ const userSchema = new mongoose.Schema({
       default:"Point"
     },
     coordinates: {
-      type: [Number],
-      required:true,
-      index:"2dSphere"
+      type: [Number]
     }
   },
   password: { type: String, required: true },
@@ -34,7 +32,6 @@ const userSchema = new mongoose.Schema({
   agent: { type: mongoose.Schema.Types.ObjectId, ref: "user" }
 }, { timestamps: true });
 
-userSchema.index({ location: "2dSphere" })
 
 const user = mongoose.model('user', userSchema);
 module.exports = user;

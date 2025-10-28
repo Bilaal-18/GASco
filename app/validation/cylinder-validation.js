@@ -1,6 +1,7 @@
 const Joi = require("joi");
 
 const cylinderSchema = Joi.object({
+    cylinderName:Joi.string().valid("Bharath","HP"),
     cylinderType:Joi.string().valid("commercial","private Commercial"),
     weight:Joi.number().min(5).max(50).required(),
     price:Joi.number().positive().required(),

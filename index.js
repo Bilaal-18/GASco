@@ -5,6 +5,7 @@ const  userCtrl  = require('./app/controllers/user-controllers');
 const cylinderCtrl = require('./app/controllers/cylinder-controllers');
 const inventaryCtrl = require("./app/controllers/inventary-controllers");
 const agentStockCtrl = require('./app/controllers/agent-stock-controllers');
+const bookingCtrl = require("./app/controllers/booking-controllers");
 
 
 const authenticateUser = require('./app/middleware/authenticateUsers');
@@ -51,6 +52,10 @@ app.get("/api/ownStock/:id",authenticateUser,authorizeUser("agent"),agentStockCt
 app.get("/api/ListAll",authenticateUser,authorizeUser("admin"),agentStockCtrl.ListAll);
 app.put("/api/updateStock/:agentId",authenticateUser,authorizeUser(["admin","agent"]),agentStockCtrl.updateStock);
 app.delete("/api/DeleteStock/:agentId/:cylinderId",authenticateUser,authorizeUser("admin"),agentStockCtrl.deleteStock);
+
+//! <--------------------BOOKING CONTROLLERS--------------------> !\\
+
+app.post("/api/newBooking",authenticateUser,authorizeUser(["customer","agent"]),bookingCtrl.NewBooking);
 
 app.listen(port,() => {
     console.log("sever running in port",port)

@@ -11,7 +11,8 @@ cylinderCtrl.createCylinder = async(req,res) => {
     try{
         const {error,value} = cylinderSchema.validate(body,{abortEarly: false });
         if(error){
-           return res.status(400).json({error:error.details})
+            console.log(err);
+           return res.status(400).json({error:error.message})
         }
         const cylinder = new Cylinder(value);
         await cylinder.save();
@@ -37,12 +38,21 @@ cylinderCtrl.listcylinder = async (req,res) => {
 //! <--------------------LIST TYPE SPERATELY--------------------> !\\
 
 cylinderCtrl.typecylinder = async (req,res) => {
-    const type = req.query.type;
-    if(!type){
-        return res.status(400).json({error:"type is required" })
+    const {type,Name }= req.query;
+    if(!type && !Name){
+        return res.status(400).json({error:"type or name is required" })
     }
     try{
-        const cylinder = await Cylinder.find({cylinderType: type });
+
+        const query ={};
+        if(type) query.cylinderType = type;
+        if(Name) query.cylinderName = Name;
+
+        const cylinder = await Cylinder.find(query);
+
+        if(cylinder.length == 0){
+            return res.status(404).json({error:"cylinder not avaliable"});
+        }
         res.status(201).json(cylinder);
     }catch(err){
         console.log(err);
