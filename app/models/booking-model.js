@@ -9,7 +9,9 @@ const bookingSchema = new mongoose.Schema({
         enum:["pending","confirmed","delivered","cancelled"],
         default:"pending"
     },
-    deliveryDate:Date
+     paymentStatus: { type: String, enum: ["pending", "paid"], default: "pending" },
+    isReturned:{ type:Boolean,default:false },
+    createdAt:{type:Date,default:Date.now()}
 },{timestamps:true});
 
 const booking = mongoose.model('booking', bookingSchema);

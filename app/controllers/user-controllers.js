@@ -91,28 +91,28 @@ userCtrl.register = async (req, res) => {
     try{
         const User = await user.findOne({ email:value.email });
         if(!User){
-            res.status(401).json({ error:"invalid email / password" });
+           return  res.status(401).json({ error:"invalid email / password" });
         }
 
         const passwordMatch = await bcryptjs.compare(value.password,User.password);
     
         if(!passwordMatch){
-            res.status(401).json({ error : "invalid email / password"})
+           return res.status(401).json({ error : "invalid email / password"})
         }
         const tokenData = {
             UserId :User._id,
             role:User.role
         };
         const token = jwt.sign(tokenData,process.env.JWT_SECRET,{
-            expiresIn:"1d",
+            expiresIn:"30d",
         });
-        res.status(201).json({
+        return  res.status(201).json({
             message:"login Successfull",
             token,
             role:User.role
         });
     }catch(err){
-    res.status(500).json({ error:"something went wrong!!!" })
+     return res.status(500).json({ error:"something went wrong!!!" })
     }
 }
 
@@ -120,7 +120,7 @@ userCtrl.register = async (req, res) => {
 
 userCtrl.customers = async(req,res) => {
     try{
-        const customers = await user.find({role:"customer"});
+        const customers = await user.find({role:"customer"}).populate("agent","agentname phoneNo email");
         res.status(201).json(customers);
 
     }catch(err){
@@ -133,8 +133,9 @@ userCtrl.customers = async(req,res) => {
 
 userCtrl.agent = async(req,res) => {
     try{
-        const agent = await user.find({role:"agent"});
-        res.status(201).json(agent);
+        const agents = await user.find({ role: "agent" }, "agentname email phoneNo vehicleNo address");
+
+        res.status(201).json(agents);
     }catch(err){
         console.log(err);
         res.status(500).json({error:"agent not found"});
@@ -146,7 +147,7 @@ userCtrl.agent = async(req,res) => {
 userCtrl.account = async (req,res) => {
     //const body = req.params.id;
     try{
-        const User = await user.findById(req.params.id);
+        const User = await user.findById(req.UserId);
         res.json(User);
     }catch(err){
         console.log(err);
@@ -204,6 +205,169 @@ userCtrl.removeAgent = async (req,res) => {
     }
 };
 
+//! <--------------------UPDATE AGENT--------------------> !\\
+
+userCtrl.updateAgent = async (req, res) => {
+    const id = req.params.id;
+    const userId = req.UserId;
+    const userRole = req.role;
+    const body = req.body;
+    
+    try {
+        // Allow agents to update only their own profile, admins can update any agent
+        if (userRole === "agent" && userId.toString() !== id.toString()) {
+            return res.status(403).json({ error: "You can only update your own profile" });
+        }
+        
+        const existingAgent = await user.findById(id);
+        if (!existingAgent || existingAgent.role !== "agent") {
+            return res.status(404).json({ error: "Agent not found" });
+        }
+
+        // Check if email is being updated and if it's already taken
+        if (body.email && body.email !== existingAgent.email) {
+            const emailExists = await user.findOne({ email: body.email });
+            if (emailExists) {
+                return res.status(400).json({ error: "Email already taken" });
+            }
+        }
+
+        let updateData = { ...body };
+
+        // If address is being updated, geocode it
+        if (body.address && (body.address.street || body.address.city || body.address.state || body.address.pincode)) {
+            const addressData = {
+                street: body.address.street || existingAgent.address?.street || "",
+                city: body.address.city || existingAgent.address?.city || "",
+                state: body.address.state || existingAgent.address?.state || "",
+                pincode: body.address.pincode || existingAgent.address?.pincode || ""
+            };
+
+            const fullAddress = `${addressData.street}, ${addressData.city}, ${addressData.state}, ${addressData.pincode}`;
+            
+            try {
+                const geoResponse = await axios.get("https://geocode.maps.co/search", {
+                    params: {
+                        q: fullAddress,
+                        api_key: process.env.API_KEY
+                    }
+                });
+
+                if (geoResponse.data && geoResponse.data.length > 0) {
+                    const { lat, lon } = geoResponse.data[0];
+                    updateData.location = {
+                        type: "Point",
+                        coordinates: [parseFloat(lon), parseFloat(lat)]
+                    };
+                }
+            } catch (geoErr) {
+                console.error("Geocoding error:", geoErr);
+                // Continue without location update if geocoding fails
+            }
+            
+            updateData.address = addressData;
+        }
+
+        // If password is being updated, hash it
+        if (body.password && body.password.trim() !== "") {
+            const salt = await bcryptjs.genSalt();
+            updateData.password = await bcryptjs.hash(body.password, salt);
+        } else {
+            // Remove password from updateData if not provided
+            delete updateData.password;
+        }
+
+        // Don't allow role or agent field to be updated through this endpoint
+        delete updateData.role;
+        delete updateData.agent;
+
+        const updatedAgent = await user.findByIdAndUpdate(id, updateData, { new: true });
+        res.status(200).json({ message: "Agent updated successfully", agent: updatedAgent });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Something went wrong" });
+    }
+};
+
+//! <--------------------UPDATE CUSTOMER--------------------> !\\
+
+userCtrl.updateCustomer = async (req, res) => {
+    const id = req.params.id;
+    const body = req.body;
+    
+    try {
+        const existingCustomer = await user.findById(id);
+        if (!existingCustomer || existingCustomer.role !== "customer") {
+            return res.status(404).json({ error: "Customer not found" });
+        }
+
+        // Check if email is being updated and if it's already taken
+        if (body.email && body.email !== existingCustomer.email) {
+            const emailExists = await user.findOne({ email: body.email });
+            if (emailExists) {
+                return res.status(400).json({ error: "Email already taken" });
+            }
+        }
+
+        let updateData = { ...body };
+
+        // If agent is being updated, validate it exists
+        if (body.agent) {
+            const assignedAgent = await user.findOne({ _id: body.agent, role: "agent" });
+            if (!assignedAgent) {
+                return res.status(400).json({ error: "Invalid or non-existent agent ID" });
+            }
+            updateData.agent = assignedAgent._id;
+        }
+
+        // If address is being updated, geocode it
+        if (body.address && (body.address.street || body.address.city || body.address.state || body.address.pincode)) {
+            const addressData = {
+                street: body.address.street || existingCustomer.address?.street || "",
+                city: body.address.city || existingCustomer.address?.city || "",
+                state: body.address.state || existingCustomer.address?.state || "",
+                pincode: body.address.pincode || existingCustomer.address?.pincode || ""
+            };
+
+            const fullAddress = `${addressData.street}, ${addressData.city}, ${addressData.state}, ${addressData.pincode}`;
+            
+            try {
+                const geoResponse = await axios.get("https://geocode.maps.co/search", {
+                    params: {
+                        q: fullAddress,
+                        api_key: process.env.API_KEY
+                    }
+                });
+
+                if (geoResponse.data && geoResponse.data.length > 0) {
+                    const { lat, lon } = geoResponse.data[0];
+                    updateData.location = {
+                        type: "Point",
+                        coordinates: [parseFloat(lon), parseFloat(lat)]
+                    };
+                }
+            } catch (geoErr) {
+                console.error("Geocoding error:", geoErr);
+                // Continue without location update if geocoding fails
+            }
+            
+            updateData.address = addressData;
+        }
+
+        // If password is being updated, hash it
+        if (body.password) {
+            const salt = await bcryptjs.genSalt();
+            updateData.password = await bcryptjs.hash(body.password, salt);
+        }
+
+        const updatedCustomer = await user.findByIdAndUpdate(id, updateData, { new: true });
+        res.status(200).json({ message: "Customer updated successfully", customer: updatedCustomer });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Something went wrong" });
+    }
+};
+
 //! <--------------------DELETE CUSTOMER--------------------> !\\
 
 userCtrl.remove = async (req,res) => {
@@ -218,6 +382,22 @@ userCtrl.remove = async (req,res) => {
         console.log(err);
         res.status(500).json({error:"something went wrong"})
     }
+};
+
+//! <--------------------SINGLE AGENT-CUSTOMER-------------------> !\\
+
+userCtrl.agentCustomers = async (req, res) => {
+  try {
+    const agentId = req.params.id;
+    const customers = await user.find({ agent: agentId, role: "customer" }).select(
+      "username email phoneNo address location"
+    );
+
+    res.status(200).json({ customers });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong" });
+  }
 };
 
  module.exports = userCtrl;

@@ -11,9 +11,9 @@ const userSchema = Joi.object({
         city:Joi.string().optional(),
         state:Joi.string().optional(),
         pincode:Joi.string().pattern(/^[0-9]{6}$/).optional()
-        }),location:Joi.object({
+        }).required(),location:Joi.object({
             type:Joi.string().valid("Point").default("Point"),
-            coordinates:Joi.array().items(Joi.number()).length(2).required()
+            coordinates:Joi.array().items(Joi.number()).length(2)
         }),
         password:Joi.string().min(8).max(128).required(),
 

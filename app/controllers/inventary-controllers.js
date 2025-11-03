@@ -72,7 +72,7 @@ inventaryCtrl.delete = async(req,res) => {
     const id = req.params.id;
     try{
         const Inventary = await inventary.findByIdAndDelete(id);
-        await agentStock.DeleteMany({cylinder:id});
+        //await agentStock.DeleteMany({cylinder:id});
         res.status(200).json({message:"inventary successfully deleted",Inventary}); 
     }catch(err){
         console.log(err);

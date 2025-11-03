@@ -2,7 +2,9 @@ const { required } = require('joi');
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
+  profilepic:{type:String},
   username: String,
+  agentname:String,
   businessname: String,
   vehicleNo: String,
   email: String,

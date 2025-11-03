@@ -11,7 +11,7 @@ cylinderCtrl.createCylinder = async(req,res) => {
     try{
         const {error,value} = cylinderSchema.validate(body,{abortEarly: false });
         if(error){
-            console.log(err);
+            console.log(error);
            return res.status(400).json({error:error.message})
         }
         const cylinder = new Cylinder(value);
@@ -19,7 +19,7 @@ cylinderCtrl.createCylinder = async(req,res) => {
         res.json(cylinder);
     }catch(err){
         console.log(err);
-        res.status(500).json({error:"something went wrong"});
+        res.status(500).json({err:"something went wrong"});
     }
 }
 
@@ -64,11 +64,9 @@ cylinderCtrl.typecylinder = async (req,res) => {
 
 cylinderCtrl.update = async (req,res) => {
     const id = req.params.id;
-    if(!type){
-        return res.status(400).json({error:"type is required" });
-    }
+    const body = req.body;
     try{
-        const cylinder = await Cylinder.findByIdAndUpdate(id);
+        const cylinder = await Cylinder.findByIdAndUpdate(id,body,{new:true});
         res.status(200).json(cylinder);
     }catch(err){
         console.log(err);
