@@ -30,6 +30,11 @@ const bookingSchema = new mongoose.Schema({
          enum: ["pending", "paid"], 
          default: "pending" 
         },
+    paymentMethod: {
+        type: String,
+        enum: ["online", "cash"],
+        default: "cash"
+    },
     isReturned:{
          type:Boolean,
          default:false

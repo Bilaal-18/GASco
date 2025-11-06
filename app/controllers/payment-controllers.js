@@ -69,6 +69,20 @@ paymentCtrl.createRazorpayOrder = async (req, res) => {
       return res.status(400).json({ error: 'Booking is already paid' });
     }
 
+    // Check if booking is delivered - payment only allowed after delivery
+    if (booking.status !== 'delivered') {
+      return res.status(400).json({ 
+        error: 'Payment can only be made after the cylinder is delivered. Please wait for delivery confirmation.' 
+      });
+    }
+
+    // Check if payment method is online
+    if (booking.paymentMethod !== 'online') {
+      return res.status(400).json({ 
+        error: 'This booking is set for cash payment. Please contact your agent for cash payment.' 
+      });
+    }
+
     // Calculate total amount
     const cylinder = booking.cylinder;
     if (!cylinder || !cylinder.price) {
@@ -78,10 +92,15 @@ paymentCtrl.createRazorpayOrder = async (req, res) => {
     const amount = (cylinder.price * booking.quantity) * 100; // Convert to paise
 
     // Create Razorpay order
+    // Receipt must be max 40 characters - use short booking ID and timestamp
+    const shortBookingId = bookingId.toString().slice(-8); // Last 8 chars of ObjectId
+    const timestamp = Date.now().toString().slice(-8); // Last 8 digits of timestamp
+    const receipt = `B${shortBookingId}${timestamp}`; // Max 17 chars: B + 8 + 8
+    
     const options = {
       amount: amount,
       currency: 'INR',
-      receipt: `booking_${bookingId}_${Date.now()}`,
+      receipt: receipt,
       notes: {
         bookingId: bookingId.toString(),
         customerId: userId.toString(),

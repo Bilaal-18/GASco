@@ -2,13 +2,14 @@ const Booking = require("../models/booking-model");
 const Cylinder = require("../models/cylinder-model");
 const User = require("../models/user-model");
 const AgentStock = require("../models/agent-stock-model");
+const Payment = require("../models/payment-model");
 
 const bookingCtrl = {};
 
 //! -------------------- CREATE BOOKING -------------------- //
 bookingCtrl.NewBooking = async (req, res) => {
   try {
-    const { quantity, cylinderId } = req.body;
+    const { quantity, cylinderId, paymentMethod } = req.body;
     const customerId = req.UserId;
 
     if (!quantity || quantity <= 0) {
@@ -16,6 +17,9 @@ bookingCtrl.NewBooking = async (req, res) => {
     }
     if (!cylinderId) {
       return res.status(400).json({ error: "Cylinder ID is required" });
+    }
+    if (paymentMethod && !["online", "cash"].includes(paymentMethod)) {
+      return res.status(400).json({ error: "Payment method must be 'online' or 'cash'" });
     }
 
     const customer = await User.findById(customerId).populate("agent");
@@ -37,6 +41,8 @@ bookingCtrl.NewBooking = async (req, res) => {
       agent: agent._id,
       cylinder: cylinderId,
       quantity,
+      paymentMethod: paymentMethod || "cash", // Default to cash if not specified
+      paymentStatus: "pending", // Payment will be done after delivery
     });
 
     await booking.save();
@@ -73,9 +79,9 @@ bookingCtrl.singleBooking = async (req, res) => {
   try {
     const id = req.params.id;
     const booking = await Booking.findById(id)
-      .populate("customer", "username businessName phoneNo")
-      .populate("agent", "agentname phoneNo")
-      .populate("cylinder", "cylinderType weight price");
+      .populate("customer", "username businessName phoneNo email address location")
+      .populate("agent", "agentname username phoneNo email address")
+      .populate("cylinder", "cylinderType weight price cylinderName");
 
     if (!booking) return res.status(404).json({ error: "Booking not found" });
 
@@ -93,8 +99,15 @@ bookingCtrl.updateBooking = async (req, res) => {
     const { quantity, status, paymentStatus, isReturned } = req.body;
     const userRole = req.role;
 
-    let booking = await Booking.findById(id);
+    let booking = await Booking.findById(id)
+      .populate("cylinder")
+      .populate("customer")
+      .populate("agent");
     if (!booking) return res.status(404).json({ error: "Booking not found" });
+
+    // Store original payment status to check if we need to create a payment record
+    const originalPaymentStatus = booking.paymentStatus;
+    const userId = req.UserId;
 
     if (userRole === "agent") {
       if (status) booking.status = status;
@@ -111,7 +124,47 @@ bookingCtrl.updateBooking = async (req, res) => {
     }
 
     await booking.save();
-    res.status(200).json({ message: "Booking updated successfully", booking });
+
+    // Create payment record if agent marked cash payment as received
+    if (userRole === "agent" && 
+        paymentStatus === "paid" && 
+        originalPaymentStatus === "pending" && 
+        booking.paymentMethod === "cash" &&
+        booking.status === "delivered") {
+      try {
+        const amount = (booking.cylinder?.price || 0) * (booking.quantity || 0);
+        
+        // Check if payment record already exists
+        const existingPayment = await Payment.findOne({ booking: booking._id });
+        
+        if (!existingPayment && amount > 0) {
+          const payment = new Payment({
+            booking: booking._id,
+            customer: booking.customer?._id || booking.customer,
+            agent: booking.agent?._id || booking.agent,
+            amount: amount,
+            method: 'cash',
+            status: 'completed',
+            transactionID: `CASH_${booking._id}_${Date.now()}`,
+            paymentDate: new Date(),
+          });
+          
+          await payment.save();
+          console.log(`Cash payment record created for booking ${booking._id}`);
+        }
+      } catch (paymentErr) {
+        console.error("Error creating cash payment record:", paymentErr);
+        // Don't fail the booking update if payment record creation fails
+      }
+    }
+    
+    // Populate the booking before sending response
+    const updatedBooking = await Booking.findById(booking._id)
+      .populate("customer", "username businessName phoneNo email address location")
+      .populate("agent", "agentname username phoneNo email address")
+      .populate("cylinder", "cylinderType weight price cylinderName");
+    
+    res.status(200).json({ message: "Booking updated successfully", booking: updatedBooking });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong while updating booking" });
@@ -178,9 +231,9 @@ bookingCtrl.cancelBooking = async (req, res) => {
     }
 
     const updatedBooking = await Booking.findById(id)
-      .populate("customer", "username businessName phoneNo")
-      .populate("agent", "agentname phoneNo")
-      .populate("cylinder", "cylinderType weight price");
+      .populate("customer", "username businessName phoneNo email address location")
+      .populate("agent", "agentname username phoneNo email address")
+      .populate("cylinder", "cylinderType weight price cylinderName");
 
     res.status(200).json({ message: "Booking cancelled successfully", booking: updatedBooking });
   } catch (err) {
@@ -258,7 +311,7 @@ bookingCtrl.getCustomerBookings = async (req, res) => {
     const customerId = req.UserId;
     const bookings = await Booking.find({ customer: customerId })
       .populate("customer", "username businessName phoneNo email address location")
-      .populate("agent", "agentname phoneNo")
+      .populate("agent", "agentname username phoneNo email address")
       .populate("cylinder", "cylinderType weight price cylinderName")
       .sort({ createdAt: -1 });
 

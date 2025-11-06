@@ -9,8 +9,10 @@ const agentStockCtrl = require('./app/controllers/agent-stock-controllers');
 const bookingCtrl = require("./app/controllers/booking-controllers");
 const gasRequestCtrl = require("./app/controllers/gas-request-controllers");
 const paymentCtrl = require("./app/controllers/payment-controllers");
+const agentPaymentCtrl = require("./app/controllers/agent-payment-controllers");
 const uploadCtrl = require("./app/controllers/upload-controllers");
 const homeCtrl = require("./app/controllers/home-controllers");
+const translationCtrl = require("./app/controllers/translation-controllers");
 const fileUpload = require('express-fileupload');
 
 
@@ -25,9 +27,9 @@ const port = process.env.PORT;
 app.use(cors());
 app.use(express.json());
 app.use(fileUpload({
-  useTempFiles: false,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
-  abortOnLimit: true
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max file size
+  abortOnLimit: true,
+  createParentPath: true
 }));
 configureDB();
 
@@ -100,6 +102,14 @@ app.post("/api/payment/verify",authenticateUser,authorizeUser(["customer","agent
 app.get("/api/payment/history",authenticateUser,authorizeUser(["customer","agent","admin"]),paymentCtrl.getPaymentHistory);
 app.get("/api/payment/:id",authenticateUser,authorizeUser(["customer","agent","admin"]),paymentCtrl.getPaymentById);
 
+//! <--------------------AGENT PAYMENT CONTROLLERS--------------------> !\\
+
+app.post("/api/agent/payment/create-order",authenticateUser,authorizeUser("agent"),agentPaymentCtrl.createRazorpayOrder);
+app.post("/api/agent/payment/verify",authenticateUser,authorizeUser("agent"),agentPaymentCtrl.verifyPayment);
+app.post("/api/agent/payment/cash",authenticateUser,authorizeUser("agent"),agentPaymentCtrl.createCashPayment);
+app.get("/api/agent/payment/history",authenticateUser,authorizeUser("agent"),agentPaymentCtrl.getAgentPaymentHistory);
+app.get("/api/admin/agent-payments",authenticateUser,authorizeUser("admin"),agentPaymentCtrl.getAllAgentPayments);
+
 //! <--------------------UPLOAD CONTROLLERS--------------------> !\\
 
 app.post("/api/upload/profile-image",authenticateUser,authorizeUser(["customer","agent","admin"]),uploadCtrl.uploadProfileImage);
@@ -109,6 +119,12 @@ app.delete("/api/upload/delete-image",authenticateUser,authorizeUser(["customer"
 
 app.get("/api/public/stats",homeCtrl.getPublicStats);
 app.get("/api/public/cylinders",homeCtrl.getPublicCylinders);
+
+//! <--------------------TRANSLATION CONTROLLERS--------------------> !\\
+
+app.post("/api/translate/manglish-to-english",authenticateUser,translationCtrl.translateManglishToEnglish);
+app.post("/api/translate/english-to-manglish",authenticateUser,translationCtrl.translateEnglishToManglish);
+app.post("/api/translate/detect",authenticateUser,translationCtrl.detectManglish);
 
 app.listen(port,() => {
     console.log("sever running in port",port)
