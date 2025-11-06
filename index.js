@@ -8,6 +8,10 @@ const inventaryCtrl = require("./app/controllers/inventary-controllers");
 const agentStockCtrl = require('./app/controllers/agent-stock-controllers');
 const bookingCtrl = require("./app/controllers/booking-controllers");
 const gasRequestCtrl = require("./app/controllers/gas-request-controllers");
+const paymentCtrl = require("./app/controllers/payment-controllers");
+const uploadCtrl = require("./app/controllers/upload-controllers");
+const homeCtrl = require("./app/controllers/home-controllers");
+const fileUpload = require('express-fileupload');
 
 
 const authenticateUser = require('./app/middleware/authenticateUsers');
@@ -19,7 +23,12 @@ const app = express();
 const port = process.env.PORT;
 
 app.use(cors());
-app.use(express.json())
+app.use(express.json());
+app.use(fileUpload({
+  useTempFiles: false,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  abortOnLimit: true
+}));
 configureDB();
 
  //! <-------------------- USERSCONTROLLER --------------------> !\\
@@ -30,8 +39,10 @@ app.get("/api/agentCustomers/:id",authenticateUser,authorizeUser(["admin","agent
 app.get("/api/customers",authenticateUser,authorizeUser("admin"),userCtrl.customers);
 app.get("/api/distributors",authenticateUser,authorizeUser("admin"),userCtrl.agent);
 app.get("/api/account",authenticateUser,userCtrl.account);
+app.put("/api/account",authenticateUser,userCtrl.updateAccount);
+app.get("/api/customer/assigned-agent",authenticateUser,authorizeUser("customer"),userCtrl.getAssignedAgent);
 app.put("/api/updatePassword/:id",authenticateUser,userCtrl.UpdatePassword);
-app.put("/api/updateAgent/:id",authenticateUser,userCtrl.updateAgent);
+app.put("/api/updateAgent/:id",authenticateUser,authorizeUser(["admin","agent"]),userCtrl.updateAgent);
 app.put("/api/updateCustomer/:id",authenticateUser,authorizeUser("admin"),userCtrl.updateCustomer);
 app.delete("/api/removeAgent/:id",authenticateUser,userCtrl.removeAgent);
 app.delete("/api/remove/:id",authenticateUser,authorizeUser("admin"),userCtrl.remove)
@@ -75,10 +86,29 @@ app.put("/api/gasRequest/reject/:requestId",authenticateUser,authorizeUser("admi
 app.post("/api/newBooking",authenticateUser,authorizeUser(["customer","agent"]),bookingCtrl.NewBooking);
 app.get("/api/allBookings",authenticateUser,authorizeUser(["admin","agent"]),bookingCtrl.allBookings);
 app.get("/api/agentBookings",authenticateUser,authorizeUser(["agent"]),bookingCtrl.getAgentBookings);
+app.get("/api/customerBookings",authenticateUser,authorizeUser(["customer"]),bookingCtrl.getCustomerBookings);
 app.get("/api/SingleBooking/:id",authenticateUser,authorizeUser(["admin","agent"]),bookingCtrl.singleBooking);
 app.put("/api/updateBooking/:id",authenticateUser,authorizeUser(["agent","customer"]),bookingCtrl.updateBooking);
+app.patch("/api/cancelBooking/:id",authenticateUser,authorizeUser(["agent","customer"]),bookingCtrl.cancelBooking);
 app.delete("/api/deleteBooking/:id",authenticateUser,authorizeUser(["agent","customer"]),bookingCtrl.deleteBooking);
 app.get("/api/todayBookings",authenticateUser,authorizeUser("agent"),bookingCtrl.getToday);
+
+//! <--------------------PAYMENT CONTROLLERS--------------------> !\\
+
+app.post("/api/payment/create-order",authenticateUser,authorizeUser(["customer","agent"]),paymentCtrl.createRazorpayOrder);
+app.post("/api/payment/verify",authenticateUser,authorizeUser(["customer","agent"]),paymentCtrl.verifyPayment);
+app.get("/api/payment/history",authenticateUser,authorizeUser(["customer","agent","admin"]),paymentCtrl.getPaymentHistory);
+app.get("/api/payment/:id",authenticateUser,authorizeUser(["customer","agent","admin"]),paymentCtrl.getPaymentById);
+
+//! <--------------------UPLOAD CONTROLLERS--------------------> !\\
+
+app.post("/api/upload/profile-image",authenticateUser,authorizeUser(["customer","agent","admin"]),uploadCtrl.uploadProfileImage);
+app.delete("/api/upload/delete-image",authenticateUser,authorizeUser(["customer","agent","admin"]),uploadCtrl.deleteImage);
+
+//! <--------------------PUBLIC HOME CONTROLLERS--------------------> !\\
+
+app.get("/api/public/stats",homeCtrl.getPublicStats);
+app.get("/api/public/cylinders",homeCtrl.getPublicCylinders);
 
 app.listen(port,() => {
     console.log("sever running in port",port)

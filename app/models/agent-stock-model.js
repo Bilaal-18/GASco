@@ -4,11 +4,31 @@ const { type } = require("os");
 
 const agentStockSchema = new mongoose.Schema(
   {
-    agentId: { type: mongoose.Schema.Types.ObjectId, ref: "user", required: true },
-    cylinderId: { type: mongoose.Schema.Types.ObjectId,ref:"cylinder", required: true },
-    quantity: { type: Number, default: 0,required:true },
-    totalAmount:{type:Number,required:true,min:[0],default:0},
-    returnedQuantity:{type: Number,default: 0},
+    agentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "user",
+      required: true
+    },
+    cylinderId:{
+      type: mongoose.Schema.Types.ObjectId,
+      ref:"cylinder",
+      required: true
+    },
+    quantity:{
+       type: Number,
+        default: 0,
+        required:true
+      },
+    totalAmount:{
+      type:Number,
+      required:true,
+      min:[0],
+      default:0
+    },
+    returnedQuantity:{
+      type: Number,
+      default: 0
+    },
     paymentStatus: {
       type: String,
       enum: ["pending", "paid"],

@@ -147,11 +147,114 @@ userCtrl.agent = async(req,res) => {
 userCtrl.account = async (req,res) => {
     //const body = req.params.id;
     try{
-        const User = await user.findById(req.UserId);
+        const User = await user.findById(req.UserId).populate("agent", "agentname email phoneNo vehicleNo address");
         res.json(User);
     }catch(err){
         console.log(err);
         res.status(500).json({error:"something went wrong"})
+    }
+}
+
+//! <--------------------UPDATE ACCOUNT (SELF) --------------------> !\\
+
+userCtrl.updateAccount = async (req, res) => {
+    try {
+        const userId = req.UserId;
+        const body = req.body;
+        
+        const existingUser = await user.findById(userId);
+        if (!existingUser) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        // Check if email is being updated and if it's already taken
+        if (body.email && body.email !== existingUser.email) {
+            const emailExists = await user.findOne({ email: body.email });
+            if (emailExists) {
+                return res.status(400).json({ error: "Email already taken" });
+            }
+        }
+
+        let updateData = { ...body };
+
+        // If address is being updated, geocode it (for customers)
+        if (existingUser.role === "customer" && body.address && (body.address.street || body.address.city || body.address.state || body.address.pincode)) {
+            const addressData = {
+                street: body.address.street || existingUser.address?.street || "",
+                city: body.address.city || existingUser.address?.city || "",
+                state: body.address.state || existingUser.address?.state || "",
+                pincode: body.address.pincode || existingUser.address?.pincode || ""
+            };
+
+            const fullAddress = `${addressData.street}, ${addressData.city}, ${addressData.state}, ${addressData.pincode}`;
+            
+            try {
+                const geoResponse = await axios.get("https://geocode.maps.co/search", {
+                    params: {
+                        q: fullAddress,
+                        api_key: process.env.API_KEY
+                    }
+                });
+
+                if (geoResponse.data && geoResponse.data.length > 0) {
+                    const { lat, lon } = geoResponse.data[0];
+                    updateData.location = {
+                        type: "Point",
+                        coordinates: [parseFloat(lon), parseFloat(lat)]
+                    };
+                }
+            } catch (geoErr) {
+                console.error("Geocoding error:", geoErr);
+            }
+            
+            updateData.address = addressData;
+        }
+
+        // Don't allow role, agent, or password to be updated through this endpoint
+        delete updateData.role;
+        delete updateData.agent;
+        delete updateData.password;
+
+        // Handle profile picture update if provided
+        if (body.profilepic) {
+            updateData.profilepic = body.profilepic;
+        }
+
+        const updatedUser = await user.findByIdAndUpdate(userId, updateData, { new: true });
+        res.status(200).json({ message: "Profile updated successfully", user: updatedUser });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Something went wrong" });
+    }
+};
+
+//! <--------------------GET CUSTOMER ASSIGNED AGENT --------------------> !\\
+
+userCtrl.getAssignedAgent = async (req, res) => {
+    try {
+        const customerId = req.UserId;
+        const customer = await user.findById(customerId);
+        
+        if (!customer) {
+            return res.status(404).json({ error: "Customer not found" });
+        }
+        
+        if (!customer.agent) {
+            return res.status(404).json({ error: "No agent assigned" });
+        }
+        
+        const agent = await user.findById(customer.agent).select(
+            "agentname email phoneNo vehicleNo address"
+        );
+        
+        if (!agent) {
+            return res.status(404).json({ error: "Agent not found" });
+        }
+        
+        res.status(200).json({ message: "Assigned agent fetched successfully", agent });
+    } catch (err) {
+        console.log(err);
+        res.status(500).json({ error: "Something went wrong" });
     }
 }
 
@@ -281,6 +384,11 @@ userCtrl.updateAgent = async (req, res) => {
         delete updateData.role;
         delete updateData.agent;
 
+        // Handle profile picture update if provided
+        if (body.profilepic) {
+            updateData.profilepic = body.profilepic;
+        }
+
         const updatedAgent = await user.findByIdAndUpdate(id, updateData, { new: true });
         res.status(200).json({ message: "Agent updated successfully", agent: updatedAgent });
     } catch (err) {
@@ -358,6 +466,11 @@ userCtrl.updateCustomer = async (req, res) => {
         if (body.password) {
             const salt = await bcryptjs.genSalt();
             updateData.password = await bcryptjs.hash(body.password, salt);
+        }
+
+        // Handle profile picture update if provided
+        if (body.profilepic) {
+            updateData.profilepic = body.profilepic;
         }
 
         const updatedCustomer = await user.findByIdAndUpdate(id, updateData, { new: true });
