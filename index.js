@@ -13,6 +13,9 @@ const agentPaymentCtrl = require("./app/controllers/agent-payment-controllers");
 const uploadCtrl = require("./app/controllers/upload-controllers");
 const homeCtrl = require("./app/controllers/home-controllers");
 const translationCtrl = require("./app/controllers/translation-controllers");
+const forecastCtrl = require("./app/controllers/forecast-controllers");
+const customerForecastCtrl = require("./app/controllers/customer-forecast-controllers");
+const { startForecastCron } = require("./app/cron/forecastCron");
 const fileUpload = require('express-fileupload');
 
 
@@ -22,7 +25,7 @@ const authorizeUser = require('./app/middleware/authorizeUsers');
 require('dotenv').config();
 
 const app = express();
-const port = process.env.PORT;
+const port = process.env.PORT ;
 
 app.use(cors());
 app.use(express.json());
@@ -126,7 +129,20 @@ app.post("/api/translate/manglish-to-english",authenticateUser,translationCtrl.t
 app.post("/api/translate/english-to-manglish",authenticateUser,translationCtrl.translateEnglishToManglish);
 app.post("/api/translate/detect",authenticateUser,translationCtrl.detectManglish);
 
+//! <--------------------FORECAST ROUTES--------------------> !\\
+
+app.get("/api/agents/:agentId/forecast",authenticateUser,authorizeUser(["admin","agent"]),forecastCtrl.getAgentForecast);
+app.get("/api/agents/:agentId/forecast/stats",authenticateUser,authorizeUser(["admin","agent"]),forecastCtrl.getAgentForecastStats);
+app.get("/api/agents/:agentId/customers/forecasts",authenticateUser,authorizeUser(["admin","agent"]),customerForecastCtrl.getAgentCustomersForecasts);
+
 app.listen(port,() => {
-    console.log("sever running in port",port)
+    console.log("sever running in port",port);
+    
+    // Forecast cron job is disabled - forecasts are now generated on-demand via refresh button
+    // Uncomment the lines below if you want to re-enable automatic forecast generation
+    // setTimeout(() => {
+    //     startForecastCron();
+    // }, 3000); // Wait 3 seconds for DB connection
+    console.log("Forecast cron job is disabled. Use refresh button to generate forecasts on-demand.");
 });
 

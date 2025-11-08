@@ -4,7 +4,7 @@ const paymentSchema = new mongoose.Schema({
     customer:{type:mongoose.Schema.Types.ObjectId, ref : 'user', required: true},
     agent:{type:mongoose.Schema.Types.ObjectId, ref : 'user'},
     amount:{type:Number, required: true},
-    method:{type:String,enum:["cash","upi","razorpay","card","netbanking","wallet"],required:true},
+    method:{type:String,enum:["cash","online"],required:true},
     status:{type:String,enum:["pending","completed","failed","refunded"],default:"pending"},
     razorpayOrderId:{type:String},
     razorpayPaymentId:{type:String},

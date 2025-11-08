@@ -67,23 +67,28 @@ agentStockCtrl.addStock = async (req, res) => {
 //! <--------------------SINGLE AGENT STOCK-------------------> !\\
 
 agentStockCtrl.OwnStock = async(req,res) =>{
-  const agentId = req.params.id || req.UserId; // Support both params and authenticated user
-  const authenticatedAgentId = req.UserId;
+ 
+  const agentId = req.params.id || req.UserId;
+  const authenticatedAgentId = req.UserId;     
   
-  // If using params, check if agent is accessing their own stock or is admin
+
   if (req.params.id && authenticatedAgentId.toString() !== agentId.toString()) {
-    // Allow if admin, otherwise restrict to own stock
-    // This will be handled by authorization middleware
   }
   
   try{
+  
     const finalAgentId = req.params.id || authenticatedAgentId;
-    const Ownstock = await agentStock.find({agentId: finalAgentId}).populate("cylinderId","cylinderType weight price");
+    
+  
+    const Ownstock = await agentStock.find({agentId: finalAgentId}) 
+      .populate("cylinderId","cylinderType weight price");            
     
     if(Ownstock.length == 0 ){
       return res.status(200).json({Ownstock: [], totalAmount: 0});
     }
+    
     const totalAmount = Ownstock.reduce((sum,s) => sum + (s.totalAmount || 0), 0);
+
     res.json({Ownstock, totalAmount});
   }catch(err){
     console.log(err);
@@ -241,7 +246,7 @@ agentStockCtrl.generateReport = async (req, res) => {
 //! <--------------------AGENT STATS--------------------> !\\
 
 agentStockCtrl.getStats = async (req, res) => {
-  const agentId = req.UserId; // Get agent ID from authenticated user
+  const agentId = req.UserId;
 
   if (!agentId) {
     return res.status(401).json({ error: "Agent ID not found" });
@@ -251,23 +256,18 @@ agentStockCtrl.getStats = async (req, res) => {
     // Get agent stocks
     const stocks = await agentStock.find({ agentId }).populate("cylinderId", "price");
     
-    // Get agent bookings with populated data
     const bookings = await Booking.find({ agent: agentId })
       .populate("cylinder", "price")
       .populate("customer", "username");
 
-    // Calculate stock received
     const stockReceived = stocks.reduce((sum, stock) => sum + (stock.quantity || 0), 0);
     
-    // Calculate cylinders delivered (only delivered status)
     const cylindersDelivered = bookings
       .filter(b => b.status === "delivered")
       .reduce((sum, booking) => sum + (booking.quantity || 0), 0);
     
-    // Calculate pending returns (delivered but not returned)
     const pendingReturns = bookings.filter((b) => !b.isReturned && b.status === "delivered").length;
     
-    // Calculate payment stats from bookings
     const amountCollected = bookings
       .filter((b) => b.paymentStatus === "paid" && b.cylinder && b.cylinder.price)
       .reduce((sum, b) => {

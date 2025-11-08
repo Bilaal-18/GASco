@@ -3,10 +3,9 @@ const User = require('../models/user-model');
 
 const homeCtrl = {};
 
-// Get public statistics for home page
+//! <-------------------GET VIEW ALL STATS--------------------> !\\
 homeCtrl.getPublicStats = async (req, res) => {
   try {
-    // Get total agents and customers (excluding admin)
     const [agentsCount, customersCount] = await Promise.all([
       User.countDocuments({ role: 'agent' }),
       User.countDocuments({ role: 'customer' })
@@ -22,14 +21,13 @@ homeCtrl.getPublicStats = async (req, res) => {
   }
 };
 
-// Get available cylinder types for home page
+//! <--------------------CYLINDERS AVAILABLE--------------------> !\\
 homeCtrl.getPublicCylinders = async (req, res) => {
   try {
     const cylinders = await Cylinder.find({ available: true })
       .select('cylinderName cylinderType weight price')
       .sort({ cylinderName: 1, cylinderType: 1 });
 
-    // Group cylinders by type and name
     const groupedCylinders = {};
     cylinders.forEach(cylinder => {
       const key = `${cylinder.cylinderName}-${cylinder.cylinderType}`;
@@ -56,6 +54,10 @@ homeCtrl.getPublicCylinders = async (req, res) => {
 };
 
 module.exports = homeCtrl;
+
+
+
+
 
 
 

@@ -1,59 +1,61 @@
+
 const mongoose = require('mongoose');
 
 const agentPaymentSchema = new mongoose.Schema({
+
   agent: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'user',
-    required: true
+    type: mongoose.Schema.Types.ObjectId,  
+    ref: 'user',                           
+    required: true                         
   },
   admin: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'user',
-    required: true
+    type: mongoose.Schema.Types.ObjectId,  
+    ref: 'user',                            
+    required: true                          
   },
   amount: {
-    type: Number,
-    required: true,
-    min: 0
+    type: Number,   
+    required: true, 
+    min: 0          
   },
   method: {
-    type: String,
-    enum: ['cash', 'razorpay'],
-    required: true
+    type: String,                           
+    enum: ['cash', 'online'],            
+    required: true                          
   },
   status: {
-    type: String,
-    enum: ['pending', 'completed', 'failed'],
-    default: 'pending'
+    type: String,                                   
+    enum: ['pending', 'completed', 'failed'],       
+    default: 'pending'                              
   },
   description: {
-    type: String,
-    default: 'Payment to admin'
+    type: String,                          
+    default: 'Payment to admin'            
   },
   razorpayOrderId: {
-    type: String
+    type: String 
   },
   razorpayPaymentId: {
-    type: String
+    type: String  
   },
   razorpaySignature: {
-    type: String
+    type: String  
   },
   transactionID: {
-    type: String
+    type: String  
   },
   paymentDate: {
-    type: Date,
-    default: Date.now
+    type: Date,            
+    default: Date.now       
   },
   notes: {
-    type: String
+    type: String  
   },
   stockIds: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'agentStock'
+    type: mongoose.Schema.Types.ObjectId,  
+    ref: 'agentStock'                      
   }]
-}, { timestamps: true });
+}, { timestamps: true }); 
+
 
 module.exports = mongoose.model('AgentPayment', agentPaymentSchema);
-

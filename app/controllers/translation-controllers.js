@@ -10,7 +10,7 @@ const getGeminiModel = (preferredModel = null) => {
   }
 
   // Try preferred model first, then fallback to faster models
-  const modelName = preferredModel || process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const modelName = process.env.GEMINI_MODEL || "gemini-2.5-flash";
   const genAI = new GoogleGenerativeAI(apiKey);
   return genAI.getGenerativeModel({ model: modelName });
 };

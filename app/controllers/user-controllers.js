@@ -3,6 +3,7 @@ const {userSchema,agentSchema,adminSchema,userLoginSchema} = require('../validat
 const bcryptjs= require("bcryptjs");
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
+const mongoose = require('mongoose');
 const userCtrl={};
 
 //! <-------------------- REGISTER --------------------> !\\
@@ -133,8 +134,10 @@ userCtrl.customers = async(req,res) => {
 
 userCtrl.agent = async(req,res) => {
     try{
-        const agents = await user.find({ role: "agent" }, "agentname email phoneNo vehicleNo address");
-
+        const agents = await user.find(
+            { role: "agent" },                              
+            "agentname email phoneNo vehicleNo address"
+        );
         res.status(201).json(agents);
     }catch(err){
         console.log(err);
@@ -167,7 +170,6 @@ userCtrl.updateAccount = async (req, res) => {
             return res.status(404).json({ error: "User not found" });
         }
 
-        // Check if email is being updated and if it's already taken
         if (body.email && body.email !== existingUser.email) {
             const emailExists = await user.findOne({ email: body.email });
             if (emailExists) {
@@ -176,8 +178,6 @@ userCtrl.updateAccount = async (req, res) => {
         }
 
         let updateData = { ...body };
-
-        // If address is being updated, geocode it (for customers)
         if (existingUser.role === "customer" && body.address && (body.address.street || body.address.city || body.address.state || body.address.pincode)) {
             const addressData = {
                 street: body.address.street || existingUser.address?.street || "",
@@ -210,12 +210,10 @@ userCtrl.updateAccount = async (req, res) => {
             updateData.address = addressData;
         }
 
-        // Don't allow role, agent, or password to be updated through this endpoint
         delete updateData.role;
         delete updateData.agent;
         delete updateData.password;
 
-        // Handle profile picture update if provided
         if (body.profilepic) {
             updateData.profilepic = body.profilepic;
         }
@@ -317,7 +315,7 @@ userCtrl.updateAgent = async (req, res) => {
     const body = req.body;
     
     try {
-        // Allow agents to update only their own profile, admins can update any agent
+        
         if (userRole === "agent" && userId.toString() !== id.toString()) {
             return res.status(403).json({ error: "You can only update your own profile" });
         }
@@ -327,7 +325,6 @@ userCtrl.updateAgent = async (req, res) => {
             return res.status(404).json({ error: "Agent not found" });
         }
 
-        // Check if email is being updated and if it's already taken
         if (body.email && body.email !== existingAgent.email) {
             const emailExists = await user.findOne({ email: body.email });
             if (emailExists) {
@@ -337,7 +334,6 @@ userCtrl.updateAgent = async (req, res) => {
 
         let updateData = { ...body };
 
-        // If address is being updated, geocode it
         if (body.address && (body.address.street || body.address.city || body.address.state || body.address.pincode)) {
             const addressData = {
                 street: body.address.street || existingAgent.address?.street || "",
@@ -365,26 +361,20 @@ userCtrl.updateAgent = async (req, res) => {
                 }
             } catch (geoErr) {
                 console.error("Geocoding error:", geoErr);
-                // Continue without location update if geocoding fails
             }
             
             updateData.address = addressData;
         }
 
-        // If password is being updated, hash it
         if (body.password && body.password.trim() !== "") {
             const salt = await bcryptjs.genSalt();
             updateData.password = await bcryptjs.hash(body.password, salt);
         } else {
-            // Remove password from updateData if not provided
             delete updateData.password;
         }
-
-        // Don't allow role or agent field to be updated through this endpoint
         delete updateData.role;
         delete updateData.agent;
 
-        // Handle profile picture update if provided
         if (body.profilepic) {
             updateData.profilepic = body.profilepic;
         }
@@ -408,8 +398,6 @@ userCtrl.updateCustomer = async (req, res) => {
         if (!existingCustomer || existingCustomer.role !== "customer") {
             return res.status(404).json({ error: "Customer not found" });
         }
-
-        // Check if email is being updated and if it's already taken
         if (body.email && body.email !== existingCustomer.email) {
             const emailExists = await user.findOne({ email: body.email });
             if (emailExists) {
@@ -419,7 +407,6 @@ userCtrl.updateCustomer = async (req, res) => {
 
         let updateData = { ...body };
 
-        // If agent is being updated, validate it exists
         if (body.agent) {
             const assignedAgent = await user.findOne({ _id: body.agent, role: "agent" });
             if (!assignedAgent) {
@@ -428,7 +415,6 @@ userCtrl.updateCustomer = async (req, res) => {
             updateData.agent = assignedAgent._id;
         }
 
-        // If address is being updated, geocode it
         if (body.address && (body.address.street || body.address.city || body.address.state || body.address.pincode)) {
             const addressData = {
                 street: body.address.street || existingCustomer.address?.street || "",
@@ -456,19 +442,16 @@ userCtrl.updateCustomer = async (req, res) => {
                 }
             } catch (geoErr) {
                 console.error("Geocoding error:", geoErr);
-                // Continue without location update if geocoding fails
             }
             
             updateData.address = addressData;
         }
 
-        // If password is being updated, hash it
         if (body.password) {
             const salt = await bcryptjs.genSalt();
             updateData.password = await bcryptjs.hash(body.password, salt);
         }
 
-        // Handle profile picture update if provided
         if (body.profilepic) {
             updateData.profilepic = body.profilepic;
         }
@@ -502,13 +485,29 @@ userCtrl.remove = async (req,res) => {
 userCtrl.agentCustomers = async (req, res) => {
   try {
     const agentId = req.params.id;
-    const customers = await user.find({ agent: agentId, role: "customer" }).select(
-      "username email phoneNo address location"
+    
+    // Validate agentId is a valid ObjectId
+    if (!mongoose.Types.ObjectId.isValid(agentId)) {
+      return res.status(400).json({ error: "Invalid agent ID" });
+    }
+    
+    // Convert to ObjectId for proper query
+    const agentObjectId = new mongoose.Types.ObjectId(agentId);
+    
+    // Find customers assigned to this agent
+    // The query ensures agent matches exactly
+    const customers = await user.find({ 
+      agent: agentObjectId, 
+      role: "customer"
+    }).select(
+      "username email phoneNo address location businessname"
     );
 
+    console.log(`Found ${customers.length} customers for agent ${agentId}`);
+    
     res.status(200).json({ customers });
   } catch (err) {
-    console.error(err);
+    console.error("Error in agentCustomers:", err);
     res.status(500).json({ error: "Something went wrong" });
   }
 };

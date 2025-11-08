@@ -7,7 +7,6 @@ const crypto = require('crypto');
 
 const paymentCtrl = {};
 
-// Initialize Razorpay instance lazily
 let razorpay = null;
 
 const getRazorpayInstance = () => {
@@ -29,9 +28,10 @@ const getRazorpayInstance = () => {
 };
 
 //! -------------------- CREATE RAZORPAY ORDER -------------------- //
+
 paymentCtrl.createRazorpayOrder = async (req, res) => {
+
   try {
-    // Check if Razorpay credentials are configured
     if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
       return res.status(500).json({ 
         error: 'Payment gateway not configured. Please contact administrator.' 
@@ -42,7 +42,7 @@ paymentCtrl.createRazorpayOrder = async (req, res) => {
     const userId = req.UserId;
     const userRole = req.role;
 
-    // Find the booking
+    
     const booking = await Booking.findById(bookingId)
       .populate('cylinder')
       .populate('customer');
@@ -51,7 +51,6 @@ paymentCtrl.createRazorpayOrder = async (req, res) => {
       return res.status(404).json({ error: 'Booking not found' });
     }
 
-    // Check authorization - customer can pay for their own bookings, agent can pay for their customer bookings
     if (userRole === 'customer') {
       const bookingCustomerId = booking.customer?._id || booking.customer;
       if (bookingCustomerId?.toString() !== userId?.toString()) {
@@ -64,38 +63,33 @@ paymentCtrl.createRazorpayOrder = async (req, res) => {
       }
     }
 
-    // Check if booking is already paid
     if (booking.paymentStatus === 'paid') {
       return res.status(400).json({ error: 'Booking is already paid' });
     }
 
-    // Check if booking is delivered - payment only allowed after delivery
     if (booking.status !== 'delivered') {
       return res.status(400).json({ 
         error: 'Payment can only be made after the cylinder is delivered. Please wait for delivery confirmation.' 
       });
     }
 
-    // Check if payment method is online
     if (booking.paymentMethod !== 'online') {
       return res.status(400).json({ 
         error: 'This booking is set for cash payment. Please contact your agent for cash payment.' 
       });
     }
 
-    // Calculate total amount
     const cylinder = booking.cylinder;
     if (!cylinder || !cylinder.price) {
       return res.status(400).json({ error: 'Cylinder price not found' });
     }
 
-    const amount = (cylinder.price * booking.quantity) * 100; // Convert to paise
+    const amount = (cylinder.price * booking.quantity) * 100; 
 
-    // Create Razorpay order
-    // Receipt must be max 40 characters - use short booking ID and timestamp
-    const shortBookingId = bookingId.toString().slice(-8); // Last 8 chars of ObjectId
-    const timestamp = Date.now().toString().slice(-8); // Last 8 digits of timestamp
-    const receipt = `B${shortBookingId}${timestamp}`; // Max 17 chars: B + 8 + 8
+  
+    const shortBookingId = bookingId.toString().slice(-8);
+    const timestamp = Date.now().toString().slice(-8);
+    const receipt = `B${shortBookingId}${timestamp}`; 
     
     const options = {
       amount: amount,
@@ -136,7 +130,6 @@ paymentCtrl.createRazorpayOrder = async (req, res) => {
 //! -------------------- VERIFY RAZORPAY PAYMENT -------------------- //
 paymentCtrl.verifyPayment = async (req, res) => {
   try {
-    // Check if Razorpay credentials are configured
     if (!process.env.RAZORPAY_KEY_SECRET) {
       return res.status(500).json({ 
         error: 'Payment gateway not configured. Please contact administrator.' 
@@ -150,7 +143,6 @@ paymentCtrl.verifyPayment = async (req, res) => {
       return res.status(400).json({ error: 'Missing payment details' });
     }
 
-    // Verify signature
     const generatedSignature = crypto
       .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
       .update(`${razorpayOrderId}|${razorpayPaymentId}`)
@@ -160,7 +152,6 @@ paymentCtrl.verifyPayment = async (req, res) => {
       return res.status(400).json({ error: 'Invalid payment signature' });
     }
 
-    // Fetch booking details
     const booking = await Booking.findById(bookingId)
       .populate('cylinder')
       .populate('customer')
@@ -170,17 +161,14 @@ paymentCtrl.verifyPayment = async (req, res) => {
       return res.status(404).json({ error: 'Booking not found' });
     }
 
-    // Check authorization
     const bookingCustomerId = booking.customer?._id || booking.customer;
     if (bookingCustomerId?.toString() !== userId?.toString()) {
       return res.status(403).json({ error: 'Unauthorized' });
     }
 
-    // Calculate amount
     const cylinder = booking.cylinder;
     const amount = cylinder.price * booking.quantity;
 
-    // Create payment record
     const payment = new Payment({
       booking: bookingId,
       customer: userId,
@@ -196,12 +184,9 @@ paymentCtrl.verifyPayment = async (req, res) => {
     });
 
     await payment.save();
-
-    // Update booking payment status
     booking.paymentStatus = 'paid';
     await booking.save();
 
-    // Populate payment before sending
     const populatedPayment = await Payment.findById(payment._id)
       .populate('booking')
       .populate('customer')
@@ -219,6 +204,7 @@ paymentCtrl.verifyPayment = async (req, res) => {
 };
 
 //! -------------------- GET PAYMENT HISTORY -------------------- //
+
 paymentCtrl.getPaymentHistory = async (req, res) => {
   try {
     const userId = req.UserId;

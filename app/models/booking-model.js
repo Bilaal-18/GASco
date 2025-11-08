@@ -35,6 +35,10 @@ const bookingSchema = new mongoose.Schema({
         enum: ["online", "cash"],
         default: "cash"
     },
+    deliveryDate: {
+        type: Date,
+        required: false
+    },
     isReturned:{
          type:Boolean,
          default:false

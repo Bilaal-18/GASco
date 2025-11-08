@@ -9,8 +9,6 @@ const gasRequestCtrl = {};
 
 gasRequestCtrl.createRequest = async (req, res) => {
   const body = req.body;
-  
-  // Use authenticated user's ID instead of body agentId for security
   const agentId = req.UserId;
 
   const { error, value } = gasRequestValidation.validate(body, { abortEarly: false });
@@ -21,7 +19,6 @@ gasRequestCtrl.createRequest = async (req, res) => {
   const { cylinderId, quantity, remarks } = value;
 
   try {
-    // Check if there's already a pending request for the same agent and cylinder
     const existingRequest = await GasRequest.findOne({
       agentId,
       cylinderId,
@@ -84,7 +81,6 @@ gasRequestCtrl.getAllRequests = async (req, res) => {
 //! <-------------------- GET AGENT'S REQUESTS --------------------> !\\
 
 gasRequestCtrl.getAgentRequests = async (req, res) => {
-  // Use authenticated user's ID for security
   const agentId = req.UserId;
 
   try {
@@ -119,12 +115,9 @@ gasRequestCtrl.approveRequest = async (req, res) => {
       return res.status(400).json({ error: `Request is already ${request.status}` });
     }
 
-    // Validate that cylinderId is populated
     if (!request.cylinderId || !request.cylinderId._id) {
       return res.status(400).json({ error: "Cylinder information not found for this request" });
     }
-
-    // Check inventory availability
     const inventory = await inventary.findOne({ cylinderId: request.cylinderId._id });
 
     if (!inventory || inventory.totalQuantity < request.quantity) {
@@ -132,15 +125,11 @@ gasRequestCtrl.approveRequest = async (req, res) => {
         error: "Insufficient stock in inventory to fulfill this request" 
       });
     }
-
-    // Deduct from inventory
     inventory.totalQuantity -= request.quantity;
     await inventory.save();
 
-    // Calculate total amount
     const totalAmount = request.cylinderId.price * request.quantity;
 
-    // Add or update agent stock
     let agentStockDoc = await agentStock.findOne({ 
       agentId: request.agentId, 
       cylinderId: request.cylinderId._id 
@@ -160,7 +149,6 @@ gasRequestCtrl.approveRequest = async (req, res) => {
       await agentStockDoc.save();
     }
 
-    // Update request status
     request.status = "approved";
     request.reviewedAt = new Date();
     await request.save();
