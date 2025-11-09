@@ -10,21 +10,28 @@ const paymentCtrl = {};
 let razorpay = null;
 
 const getRazorpayInstance = () => {
-  if (!razorpay) {
-    const keyId = process.env.RAZORPAY_KEY_ID;
-    const keySecret = process.env.RAZORPAY_KEY_SECRET;
-    
-    if (!keyId || !keySecret) {
-      throw new Error('Razorpay credentials not configured. Please set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in environment variables.');
+  try {
+    if (!razorpay) {
+      // Trim whitespace from environment variables to avoid issues
+      const keyId = process.env.RAZORPAY_KEY_ID?.trim();
+      const keySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
+      
+      if (!keyId || !keySecret) {
+        console.error('Razorpay credentials not configured. Missing RAZORPAY_KEY_ID or RAZORPAY_KEY_SECRET');
+        throw new Error('Razorpay credentials not configured. Please set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in environment variables.');
+      }
+      
+      razorpay = new Razorpay({
+        key_id: keyId,
+        key_secret: keySecret,
+      });
     }
     
-    razorpay = new Razorpay({
-      key_id: keyId,
-      key_secret: keySecret,
-    });
+    return razorpay;
+  } catch (error) {
+    console.error('Error initializing Razorpay instance:', error);
+    throw error;
   }
-  
-  return razorpay;
 };
 
 //! -------------------- CREATE RAZORPAY ORDER -------------------- //
@@ -32,7 +39,12 @@ const getRazorpayInstance = () => {
 paymentCtrl.createRazorpayOrder = async (req, res) => {
 
   try {
-    if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+    // Check if Razorpay credentials are configured
+    const keyId = process.env.RAZORPAY_KEY_ID?.trim();
+    const keySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
+    
+    if (!keyId || !keySecret) {
+      console.error('Razorpay credentials not configured');
       return res.status(500).json({ 
         error: 'Payment gateway not configured. Please contact administrator.' 
       });
@@ -42,7 +54,10 @@ paymentCtrl.createRazorpayOrder = async (req, res) => {
     const userId = req.UserId;
     const userRole = req.role;
 
-    
+    if (!bookingId) {
+      return res.status(400).json({ error: 'Booking ID is required' });
+    }
+
     const booking = await Booking.findById(bookingId)
       .populate('cylinder')
       .populate('customer');
@@ -84,7 +99,13 @@ paymentCtrl.createRazorpayOrder = async (req, res) => {
       return res.status(400).json({ error: 'Cylinder price not found' });
     }
 
-    const amount = (cylinder.price * booking.quantity) * 100; 
+    // Calculate amount in paise (Razorpay requires amount in smallest currency unit)
+    const amount = Math.round((cylinder.price * booking.quantity) * 100);
+    
+    // Razorpay minimum amount is 1 INR = 100 paise
+    if (amount < 100) {
+      return res.status(400).json({ error: 'Payment amount must be at least ₹1' });
+    } 
 
   
     const shortBookingId = bookingId.toString().slice(-8);
@@ -108,9 +129,28 @@ paymentCtrl.createRazorpayOrder = async (req, res) => {
       const razorpayInstance = getRazorpayInstance();
       razorpayOrder = await razorpayInstance.orders.create(options);
     } catch (razorpayError) {
-      console.error('Razorpay order creation error:', razorpayError);
+      console.error('Razorpay order creation error:', {
+        error: razorpayError.message,
+        errorDescription: razorpayError.error?.description,
+        statusCode: razorpayError.statusCode,
+        bookingId: bookingId,
+        amount: amount,
+        currency: 'INR'
+      });
+      
+      // Provide more specific error messages
+      let errorMessage = 'Failed to create payment order. Please try again.';
+      if (razorpayError.error?.description) {
+        errorMessage = razorpayError.error.description;
+      } else if (razorpayError.statusCode === 401) {
+        errorMessage = 'Payment gateway authentication failed. Please contact administrator.';
+      } else if (razorpayError.statusCode === 400) {
+        errorMessage = razorpayError.error?.description || 'Invalid payment request. Please check booking details.';
+      }
+      
       return res.status(500).json({ 
-        error: 'Failed to create payment order. Please check Razorpay configuration.' 
+        error: errorMessage,
+        details: process.env.NODE_ENV === 'development' ? razorpayError.message : undefined
       });
     }
 
@@ -119,7 +159,7 @@ paymentCtrl.createRazorpayOrder = async (req, res) => {
       orderId: razorpayOrder.id,
       amount: razorpayOrder.amount,
       currency: razorpayOrder.currency,
-      keyId: process.env.RAZORPAY_KEY_ID,
+      keyId: keyId, // Use the trimmed keyId
     });
   } catch (err) {
     console.error('Error creating Razorpay order:', err);
@@ -130,7 +170,11 @@ paymentCtrl.createRazorpayOrder = async (req, res) => {
 //! -------------------- VERIFY RAZORPAY PAYMENT -------------------- //
 paymentCtrl.verifyPayment = async (req, res) => {
   try {
-    if (!process.env.RAZORPAY_KEY_SECRET) {
+    // Check if Razorpay secret key is configured
+    const keySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
+    
+    if (!keySecret) {
+      console.error('Razorpay key secret not configured');
       return res.status(500).json({ 
         error: 'Payment gateway not configured. Please contact administrator.' 
       });
@@ -143,12 +187,19 @@ paymentCtrl.verifyPayment = async (req, res) => {
       return res.status(400).json({ error: 'Missing payment details' });
     }
 
+    // Verify payment signature
     const generatedSignature = crypto
-      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .createHmac('sha256', keySecret) // Use trimmed key secret
       .update(`${razorpayOrderId}|${razorpayPaymentId}`)
       .digest('hex');
 
     if (generatedSignature !== razorpaySignature) {
+      console.error('Invalid payment signature:', {
+        generated: generatedSignature.substring(0, 10) + '...',
+        received: razorpaySignature.substring(0, 10) + '...',
+        orderId: razorpayOrderId,
+        paymentId: razorpayPaymentId
+      });
       return res.status(400).json({ error: 'Invalid payment signature' });
     }
 
@@ -161,18 +212,55 @@ paymentCtrl.verifyPayment = async (req, res) => {
       return res.status(404).json({ error: 'Booking not found' });
     }
 
+    // Check authorization - allow both customer and agent to verify payment
     const bookingCustomerId = booking.customer?._id || booking.customer;
-    if (bookingCustomerId?.toString() !== userId?.toString()) {
-      return res.status(403).json({ error: 'Unauthorized' });
+    const bookingAgentId = booking.agent?._id || booking.agent;
+    const userRole = req.role;
+    
+    const isAuthorized = 
+      (userRole === 'customer' && bookingCustomerId?.toString() === userId?.toString()) ||
+      (userRole === 'agent' && bookingAgentId?.toString() === userId?.toString()) ||
+      (userRole === 'admin');
+    
+    if (!isAuthorized) {
+      return res.status(403).json({ error: 'Unauthorized: You are not authorized to verify this payment' });
+    }
+
+    // Check if payment already exists for this booking (prevent duplicate payments)
+    const existingPayment = await Payment.findOne({
+      booking: bookingId,
+      razorpayPaymentId: razorpayPaymentId
+    });
+
+    if (existingPayment) {
+      console.warn('Duplicate payment attempt detected:', {
+        bookingId,
+        paymentId: razorpayPaymentId,
+        existingPaymentId: existingPayment._id
+      });
+      return res.status(400).json({ 
+        error: 'Payment already processed for this booking',
+        payment: existingPayment
+      });
+    }
+
+    // Check if booking is already paid
+    if (booking.paymentStatus === 'paid') {
+      return res.status(400).json({ error: 'Booking is already paid' });
     }
 
     const cylinder = booking.cylinder;
+    if (!cylinder || !cylinder.price) {
+      return res.status(400).json({ error: 'Cylinder price not found' });
+    }
+
     const amount = cylinder.price * booking.quantity;
 
+    // Create payment record
     const payment = new Payment({
       booking: bookingId,
-      customer: userId,
-      agent: booking.agent?._id || booking.agent,
+      customer: bookingCustomerId,
+      agent: bookingAgentId,
       amount: amount,
       method: 'razorpay',
       status: 'completed',
@@ -184,6 +272,8 @@ paymentCtrl.verifyPayment = async (req, res) => {
     });
 
     await payment.save();
+    
+    // Update booking payment status
     booking.paymentStatus = 'paid';
     await booking.save();
 
@@ -199,7 +289,11 @@ paymentCtrl.verifyPayment = async (req, res) => {
     });
   } catch (err) {
     console.error('Error verifying payment:', err);
-    res.status(500).json({ error: 'Failed to verify payment' });
+    console.error('Error stack:', err.stack);
+    res.status(500).json({ 
+      error: 'Failed to verify payment',
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
   }
 };
 
