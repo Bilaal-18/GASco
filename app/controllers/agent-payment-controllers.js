@@ -53,26 +53,57 @@ agentPaymentCtrl.createRazorpayOrder = async (req, res) => {
       return res.status(500).json({ error: 'Payment gateway not configured' });
     }
     
-    const orderAmount = Math.round(amount * 100);
+    // Razorpay minimum amount is 1 INR = 100 paise
+    const orderAmount = Math.round(Math.max(amount, 1) * 100);
+    
+    if (orderAmount < 100) {
+      return res.status(400).json({ error: 'Payment amount must be at least ₹1' });
+    }
     
     const receipt = `AGENT_${agentId}_${Date.now()}`.substring(0, 40);
     
-    const order = await razorpay.orders.create({
-      amount: orderAmount,      
-      currency: 'INR',          
-      receipt: receipt,         
-      notes: {                 
-        agentId: agentId.toString(),
-        adminId: admin._id.toString(),
-        description: description || 'Agent payment to admin'
+    let razorpayOrder;
+    try {
+      razorpayOrder = await razorpay.orders.create({
+        amount: orderAmount,      
+        currency: 'INR',          
+        receipt: receipt,         
+        notes: {                 
+          agentId: agentId.toString(),
+          adminId: admin._id.toString(),
+          description: description || 'Agent payment to admin'
+        }
+      });
+    } catch (razorpayError) {
+      console.error('Razorpay order creation error:', {
+        error: razorpayError.message,
+        errorDescription: razorpayError.error?.description,
+        statusCode: razorpayError.statusCode,
+        agentId: agentId,
+        amount: orderAmount
+      });
+      
+      let errorMessage = 'Failed to create payment order. Please try again.';
+      if (razorpayError.error?.description) {
+        errorMessage = razorpayError.error.description;
+      } else if (razorpayError.statusCode === 401) {
+        errorMessage = 'Payment gateway authentication failed. Please contact administrator.';
       }
-    });
+      
+      return res.status(500).json({ 
+        error: errorMessage,
+        details: process.env.NODE_ENV === 'development' ? razorpayError.message : undefined
+      });
+    }
+    
+    const keyId = process.env.RAZORPAY_KEY_ID?.trim();
     
     res.status(200).json({
-      orderId: order.id,        
-      amount: order.amount,     
-      currency: order.currency,
-      receipt: order.receipt  
+      orderId: razorpayOrder.id,        
+      amount: razorpayOrder.amount,     
+      currency: razorpayOrder.currency,
+      receipt: razorpayOrder.receipt,
+      keyId: keyId // Include keyId for frontend
     });
   } catch (error) {
     console.error('Razorpay order creation error:', error);
@@ -90,13 +121,13 @@ agentPaymentCtrl.verifyPayment = async (req, res) => {
     const { orderId, paymentId, signature, amount, description, notes } = req.body;
     const agentId = req.UserId;   
     const userRole = req.role;    
-  
+    
     if (userRole !== 'agent') {
       return res.status(403).json({ error: 'Only agents can make payments to admin' });
     }
     
-    if (!orderId || !paymentId || !signature) {
-      return res.status(400).json({ error: 'Payment verification data is required' });
+    if (!orderId || !paymentId || !signature || !amount) {
+      return res.status(400).json({ error: 'Payment verification data is required (orderId, paymentId, signature, amount)' });
     }
   
     const admin = await User.findOne({ role: 'admin' });
@@ -104,15 +135,73 @@ agentPaymentCtrl.verifyPayment = async (req, res) => {
       return res.status(404).json({ error: 'Admin not found' });
     }
     
+    // Check if Razorpay secret key is configured
+    const keySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
+    
+    if (!keySecret) {
+      console.error('Razorpay key secret not configured');
+      return res.status(500).json({ 
+        error: 'Payment gateway not configured. Please contact administrator.' 
+      });
+    }
+    
     const crypto = require('crypto');
   
+    // Verify payment signature
+    const signatureString = `${orderId}|${paymentId}`;
     const generatedSignature = crypto
-      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET) 
-      .update(`${orderId}|${paymentId}`)                   
+      .createHmac('sha256', keySecret) // Use trimmed key secret
+      .update(signatureString)                   
       .digest('hex');                                   
     
+    console.log('[Agent Payment Verification] Signature verification:', {
+      orderId: orderId,
+      paymentId: paymentId,
+      signatureString: signatureString,
+      keySecretLength: keySecret.length,
+      generatedSignatureLength: generatedSignature.length,
+      receivedSignatureLength: signature.length,
+      signaturesMatch: generatedSignature === signature
+    });
+    
     if (generatedSignature !== signature) {
-      return res.status(400).json({ error: 'Invalid payment signature' });
+      console.error('[Agent Payment Verification] Invalid payment signature:', {
+        generated: generatedSignature.substring(0, 20) + '...',
+        received: signature.substring(0, 20) + '...',
+        orderId: orderId,
+        paymentId: paymentId,
+        signatureString: signatureString,
+        keySecretConfigured: !!keySecret,
+        keySecretLength: keySecret?.length || 0
+      });
+      return res.status(400).json({ 
+        error: 'Invalid payment signature. Please contact support if this issue persists.',
+        details: process.env.NODE_ENV === 'development' ? 'Signature mismatch' : undefined
+      });
+    }
+
+    // Check if payment already exists for this order (prevent duplicate payments)
+    const existingPayment = await AgentPayment.findOne({
+      razorpayOrderId: orderId,
+      razorpayPaymentId: paymentId
+    });
+
+    if (existingPayment) {
+      console.warn('Duplicate payment attempt detected:', {
+        orderId,
+        paymentId,
+        existingPaymentId: existingPayment._id
+      });
+      return res.status(400).json({ 
+        error: 'Payment already processed for this order',
+        payment: existingPayment
+      });
+    }
+
+    // Validate amount
+    const paymentAmount = parseFloat(amount);
+    if (!paymentAmount || paymentAmount <= 0) {
+      return res.status(400).json({ error: 'Invalid payment amount' });
     }
   
     const unpaidStocks = await AgentStock.find({ 
@@ -121,18 +210,21 @@ agentPaymentCtrl.verifyPayment = async (req, res) => {
     }).sort({ assignedDate: 1 });    
     
     const stockIds = [];              
-    let remainingAmount = amount;    
+    let remainingAmount = paymentAmount;    
     
     for (const stock of unpaidStocks) {
       if (remainingAmount <= 0) break; 
       
-      if (remainingAmount >= stock.totalAmount) {
+      const stockAmount = parseFloat(stock.totalAmount || 0);
+      
+      if (remainingAmount >= stockAmount) {
         stock.paymentStatus = 'paid';          
         stockIds.push(stock._id);              
-        remainingAmount -= stock.totalAmount;   
+        remainingAmount -= stockAmount;   
         await stock.save();                     
       } else {
-        if (remainingAmount === stock.totalAmount) {
+        // Partial payment - mark as paid if exact match (within 0.01 tolerance)
+        if (Math.abs(remainingAmount - stockAmount) < 0.01) {
           stock.paymentStatus = 'paid';
           stockIds.push(stock._id);
           remainingAmount = 0;
@@ -144,7 +236,7 @@ agentPaymentCtrl.verifyPayment = async (req, res) => {
     const agentPayment = new AgentPayment({
       agent: agentId,                    
       admin: admin._id,                   
-      amount: amount,                     
+      amount: paymentAmount,                     
       method: 'razorpay',               
       status: 'completed',                
       razorpayOrderId: orderId,          
@@ -159,15 +251,21 @@ agentPaymentCtrl.verifyPayment = async (req, res) => {
     
     await agentPayment.save();
     
+    const populatedPayment = await AgentPayment.findById(agentPayment._id)
+      .populate('agent', 'agentname username email phoneNo')
+      .populate('admin', 'username email');
+    
     res.status(200).json({
       message: 'Payment verified and recorded successfully',
-      payment: agentPayment
+      payment: populatedPayment,
+      stockIds: stockIds
     });
   } catch (error) {
     console.error('Payment verification error:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({ 
       error: 'Failed to verify payment',
-      details: error.message 
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
@@ -203,15 +301,18 @@ agentPaymentCtrl.createCashPayment = async (req, res) => {
     let remainingAmount = amount;
     
     for (const stock of unpaidStocks) {
-      if (remainingAmount <= 0) break;
+      if (remainingAmount <= 0) break; 
       
-      if (remainingAmount >= stock.totalAmount) {
-        stock.paymentStatus = 'paid';
-        stockIds.push(stock._id);
-        remainingAmount -= stock.totalAmount;
-        await stock.save();
+      const stockAmount = parseFloat(stock.totalAmount || 0);
+      
+      if (remainingAmount >= stockAmount) {
+        stock.paymentStatus = 'paid';          
+        stockIds.push(stock._id);              
+        remainingAmount -= stockAmount;   
+        await stock.save();                     
       } else {
-        if (remainingAmount === stock.totalAmount) {
+        // Partial payment - mark as paid if exact match (within 0.01 tolerance)
+        if (Math.abs(remainingAmount - stockAmount) < 0.01) {
           stock.paymentStatus = 'paid';
           stockIds.push(stock._id);
           remainingAmount = 0;
@@ -219,11 +320,11 @@ agentPaymentCtrl.createCashPayment = async (req, res) => {
         }
       }
     }
-    
+  
     const agentPayment = new AgentPayment({
-      agent: agentId,
-      admin: admin._id,
-      amount: amount,
+      agent: agentId,                    
+      admin: admin._id,                   
+      amount: paymentAmount,
       method: 'cash',                   
       status: 'completed',
       paymentDate: new Date(),

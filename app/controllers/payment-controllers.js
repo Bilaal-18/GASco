@@ -188,19 +188,36 @@ paymentCtrl.verifyPayment = async (req, res) => {
     }
 
     // Verify payment signature
+    const signatureString = `${razorpayOrderId}|${razorpayPaymentId}`;
     const generatedSignature = crypto
       .createHmac('sha256', keySecret) // Use trimmed key secret
-      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+      .update(signatureString)
       .digest('hex');
 
+    console.log('[Payment Verification] Signature verification:', {
+      orderId: razorpayOrderId,
+      paymentId: razorpayPaymentId,
+      signatureString: signatureString,
+      keySecretLength: keySecret.length,
+      generatedSignatureLength: generatedSignature.length,
+      receivedSignatureLength: razorpaySignature.length,
+      signaturesMatch: generatedSignature === razorpaySignature
+    });
+
     if (generatedSignature !== razorpaySignature) {
-      console.error('Invalid payment signature:', {
-        generated: generatedSignature.substring(0, 10) + '...',
-        received: razorpaySignature.substring(0, 10) + '...',
+      console.error('[Payment Verification] Invalid payment signature:', {
+        generated: generatedSignature.substring(0, 20) + '...',
+        received: razorpaySignature.substring(0, 20) + '...',
         orderId: razorpayOrderId,
-        paymentId: razorpayPaymentId
+        paymentId: razorpayPaymentId,
+        signatureString: signatureString,
+        keySecretConfigured: !!keySecret,
+        keySecretLength: keySecret?.length || 0
       });
-      return res.status(400).json({ error: 'Invalid payment signature' });
+      return res.status(400).json({ 
+        error: 'Invalid payment signature. Please contact support if this issue persists.',
+        details: process.env.NODE_ENV === 'development' ? 'Signature mismatch' : undefined
+      });
     }
 
     const booking = await Booking.findById(bookingId)
