@@ -274,12 +274,13 @@ paymentCtrl.verifyPayment = async (req, res) => {
     const amount = cylinder.price * booking.quantity;
 
     // Create payment record
+    // Note: Payment model method enum only allows "cash" or "online", so use "online" for Razorpay
     const payment = new Payment({
       booking: bookingId,
       customer: bookingCustomerId,
       agent: bookingAgentId,
       amount: amount,
-      method: 'razorpay',
+      method: 'online', // Use 'online' instead of 'razorpay' to match payment model enum
       status: 'completed',
       razorpayOrderId: razorpayOrderId,
       razorpayPaymentId: razorpayPaymentId,
@@ -288,28 +289,59 @@ paymentCtrl.verifyPayment = async (req, res) => {
       paymentDate: new Date(),
     });
 
-    await payment.save();
+    try {
+      await payment.save();
+      console.log('[Payment Verification] Payment saved successfully:', payment._id);
+    } catch (saveError) {
+      console.error('[Payment Verification] Error saving payment:', saveError);
+      throw new Error(`Failed to save payment: ${saveError.message}`);
+    }
     
     // Update booking payment status
-    booking.paymentStatus = 'paid';
-    await booking.save();
+    try {
+      booking.paymentStatus = 'paid';
+      await booking.save();
+      console.log('[Payment Verification] Booking payment status updated:', booking._id);
+    } catch (saveError) {
+      console.error('[Payment Verification] Error updating booking:', saveError);
+      // Payment is already saved, so we should still return success
+      // but log the error
+    }
 
-    const populatedPayment = await Payment.findById(payment._id)
-      .populate('booking')
-      .populate('customer')
-      .populate('agent');
+    try {
+      const populatedPayment = await Payment.findById(payment._id)
+        .populate('booking')
+        .populate('customer')
+        .populate('agent');
 
-    res.status(200).json({
-      message: 'Payment verified and completed successfully',
-      payment: populatedPayment,
-      booking: booking,
-    });
+      console.log('[Payment Verification] Payment verified and completed successfully');
+
+      res.status(200).json({
+        message: 'Payment verified and completed successfully',
+        payment: populatedPayment,
+        booking: booking,
+      });
+    } catch (populateError) {
+      console.error('[Payment Verification] Error populating payment:', populateError);
+      // Payment is saved, return the payment without population
+      res.status(200).json({
+        message: 'Payment verified and completed successfully',
+        payment: payment,
+        booking: booking,
+      });
+    }
   } catch (err) {
-    console.error('Error verifying payment:', err);
-    console.error('Error stack:', err.stack);
+    console.error('[Payment Verification] Error verifying payment:', err);
+    console.error('[Payment Verification] Error stack:', err.stack);
+    console.error('[Payment Verification] Error details:', {
+      name: err.name,
+      message: err.message,
+      code: err.code
+    });
     res.status(500).json({ 
       error: 'Failed to verify payment',
-      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined,
+      code: process.env.NODE_ENV === 'development' ? err.code : undefined
     });
   }
 };

@@ -1,6 +1,11 @@
 const jwt = require("jsonwebtoken");
 
 const authenticateUser = (req,res,next) => {
+    // Allow OPTIONS requests to pass through for CORS preflight
+    if (req.method === 'OPTIONS') {
+        return next();
+    }
+    
     const token = req.headers["authorization"];
     if(!token){
        return res.status(401).json({error:"token not provided" });
@@ -12,8 +17,9 @@ const authenticateUser = (req,res,next) => {
         req.role = tokenData.role;
         next();
     }catch(err){
-        console.log(err);
-        return res.status(500).json({ error:"something went wrong" })
+        console.error("JWT verification error:", err);
+        // Return 401 for invalid token, not 500
+        return res.status(401).json({ error:"Invalid or expired token" })
     }
 };
 

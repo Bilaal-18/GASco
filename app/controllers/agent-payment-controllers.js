@@ -237,14 +237,14 @@ agentPaymentCtrl.verifyPayment = async (req, res) => {
       agent: agentId,                    
       admin: admin._id,                   
       amount: paymentAmount,                     
-      method: 'razorpay',               
+      method: 'online', // Use 'online' instead of 'razorpay' to match agent payment model enum
       status: 'completed',                
       razorpayOrderId: orderId,          
       razorpayPaymentId: paymentId,       
       razorpaySignature: signature,        
       transactionID: paymentId,           
       paymentDate: new Date(),         
-      description: description || 'Razorpay payment to admin',
+      description: description || 'Online payment to admin',
       notes: notes,                       
       stockIds: stockIds                  
     });
