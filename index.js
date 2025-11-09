@@ -130,10 +130,21 @@ app.post("/api/translate/english-to-manglish",authenticateUser,translationCtrl.t
 app.post("/api/translate/detect",authenticateUser,translationCtrl.detectManglish);
 
 //! <--------------------FORECAST ROUTES--------------------> !\\
+// IMPORTANT: More specific routes must come FIRST to avoid route matching conflicts
 
-app.get("/api/agents/:agentId/forecast",authenticateUser,authorizeUser(["admin","agent"]),forecastCtrl.getAgentForecast);
 app.get("/api/agents/:agentId/forecast/stats",authenticateUser,authorizeUser(["admin","agent"]),forecastCtrl.getAgentForecastStats);
 app.get("/api/agents/:agentId/customers/forecasts",authenticateUser,authorizeUser(["admin","agent"]),customerForecastCtrl.getAgentCustomersForecasts);
+app.get("/api/agents/:agentId/forecast",authenticateUser,authorizeUser(["admin","agent"]),forecastCtrl.getAgentForecast);
+
+// 404 handler for unmatched API routes (for debugging)
+app.use("/api/*", (req, res) => {
+  console.log(`[404] Unmatched API route: ${req.method} ${req.originalUrl}`);
+  res.status(404).json({ 
+    error: 'Route not found',
+    path: req.originalUrl,
+    method: req.method
+  });
+});
 
 app.listen(port,() => {
     console.log("sever running in port",port);

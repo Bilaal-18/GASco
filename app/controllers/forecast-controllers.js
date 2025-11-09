@@ -21,6 +21,7 @@ const forecastCtrl = {};
  */
 forecastCtrl.getAgentForecast = async (req, res) => {
   try {
+    console.log(`[Forecast] Request received for agentId: ${req.params.agentId}`);
     const { agentId } = req.params;
     const horizon = parseInt(req.query.horizon) || 7;
     const refresh = req.query.refresh === 'true' || req.query.refresh === true;
@@ -292,6 +293,7 @@ forecastCtrl.getAgentForecast = async (req, res) => {
  */
 forecastCtrl.getAgentForecastStats = async (req, res) => {
   try {
+    console.log(`[Forecast Stats] Request received for agentId: ${req.params.agentId}`);
     const { agentId } = req.params;
     const horizon = parseInt(req.query.horizon) || 7;
     const userId = req.UserId; // From authentication middleware
@@ -327,9 +329,26 @@ forecastCtrl.getAgentForecastStats = async (req, res) => {
       }
     }).sort({ date: 1 });
     
+    // Return empty stats instead of 404 when no forecasts exist
+    // This allows the frontend to handle the empty state gracefully
     if (forecasts.length === 0) {
-      return res.status(404).json({
-        error: 'No forecasts found for this agent'
+      return res.status(200).json({
+        agentId: agentId,
+        horizon: horizon,
+        stats: {
+          totalDays: 0,
+          averageDailyDemand: 0,
+          maxDailyDemand: 0,
+          minDailyDemand: 0,
+          totalForecastedDemand: {
+            p50: 0,
+            p80: 0,
+            p95: 0
+          },
+          totalSuggestedStock: 0
+        },
+        forecasts: [],
+        message: 'No forecasts found. Click refresh to generate forecasts.'
       });
     }
     
