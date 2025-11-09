@@ -25,41 +25,9 @@ const authorizeUser = require('./app/middleware/authorizeUsers');
 require('dotenv').config();
 
 const app = express();
-const port = process.env.PORT ;
+const port = process.env.PORT || 3090; // Default to 3090 for local development
 
-// CORS configuration
-const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    const allowedOrigins = [
-      'https://ga-sco-frontend.vercel.app',
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:5173'
-    ];
-    
-    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
-      callback(null, true);
-    } else {
-      console.warn(`[CORS] Blocked origin: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-  exposedHeaders: ['Content-Range', 'X-Content-Range'],
-  optionsSuccessStatus: 200, // For legacy browser support
-  preflightContinue: false
-};
-
-// Handle preflight requests
-app.options('*', cors(corsOptions));
-
-app.use(cors(corsOptions));
+app.use(cors());
 app.use(express.json());
 app.use(fileUpload({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max file size
@@ -168,15 +136,6 @@ app.get("/api/agents/:agentId/forecast/stats",authenticateUser,authorizeUser(["a
 app.get("/api/agents/:agentId/customers/forecasts",authenticateUser,authorizeUser(["admin","agent"]),customerForecastCtrl.getAgentCustomersForecasts);
 app.get("/api/agents/:agentId/forecast",authenticateUser,authorizeUser(["admin","agent"]),forecastCtrl.getAgentForecast);
 
-// 404 handler for unmatched API routes (for debugging)
-app.use("/api/*", (req, res) => {
-  console.log(`[404] Unmatched API route: ${req.method} ${req.originalUrl}`);
-  res.status(404).json({ 
-    error: 'Route not found',
-    path: req.originalUrl,
-    method: req.method
-  });
-});
 
 app.listen(port,() => {
     console.log("sever running in port",port);
