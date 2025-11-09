@@ -87,17 +87,65 @@ forecastCtrl.getAgentForecast = async (req, res) => {
         // Generate forecast using Gemini AI
         const newForecasts = await geminiForecastService.generateForecast(agentId, horizon);
         
+        // Get upcoming scheduled bookings to merge with predictions
+        const Booking = require('../models/booking-model');
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const endDate = new Date(today);
+        endDate.setDate(endDate.getDate() + horizon);
+        endDate.setHours(23, 59, 59, 999);
+        
+        const upcomingBookings = await Booking.find({
+          agent: agentId,
+          status: { $ne: 'cancelled' },
+          deliveryDate: {
+            $gte: today,
+            $lte: endDate
+          }
+        }).select('quantity deliveryDate');
+        
+        // Create map of scheduled bookings by date
+        const scheduledByDate = {};
+        upcomingBookings.forEach(booking => {
+          const dateKey = booking.deliveryDate.toISOString().split('T')[0];
+          scheduledByDate[dateKey] = (scheduledByDate[dateKey] || 0) + booking.quantity;
+        });
+        
         // Save forecasts to MongoDB with lastUpdatedAt
+        // suggestedStock = scheduled + p95 (total needed including safety buffer)
         const now = new Date();
-        const forecastsToSave = newForecasts.map(forecast => ({
-          agentId: agentId,
-          date: new Date(forecast.date),
-          p50: forecast.p50,
-          p80: forecast.p80,
-          p95: forecast.p95,
-          suggestedStock: Math.ceil(forecast.p80 * 1.1), // Safety buffer: 10% above p80
-          lastUpdatedAt: now
-        }));
+        
+        // Calculate total scheduled to determine activity level
+        const totalScheduled = Object.values(scheduledByDate).reduce((sum, qty) => sum + qty, 0);
+        const isLowActivity = totalScheduled <= 3;
+        
+        const forecastsToSave = newForecasts.map(forecast => {
+          const scheduledQty = scheduledByDate[forecast.date] || 0;
+          // Total needed = scheduled deliveries + predicted additional demand at 95th percentile
+          const totalNeeded = scheduledQty + forecast.p95;
+          
+          // For low activity, use minimal buffer; for normal activity, add 5% buffer
+          let suggestedStock;
+          if (isLowActivity && totalNeeded <= 3) {
+            // Very low activity: round to nearest integer (minimal buffer)
+            suggestedStock = Math.round(totalNeeded * 1.02); // 2% buffer max
+            // Ensure at least the scheduled amount
+            suggestedStock = Math.max(suggestedStock, scheduledQty);
+          } else {
+            // Normal activity: add 5% buffer
+            suggestedStock = Math.ceil(totalNeeded * 1.05);
+          }
+          
+          return {
+            agentId: agentId,
+            date: new Date(forecast.date),
+            p50: forecast.p50,
+            p80: forecast.p80,
+            p95: forecast.p95,
+            suggestedStock: suggestedStock,
+            lastUpdatedAt: now
+          };
+        });
         
         // Use bulkWrite with upsert to update existing or create new forecasts
         const bulkOps = forecastsToSave.map(forecast => ({

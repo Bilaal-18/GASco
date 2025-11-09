@@ -26,35 +26,47 @@ async function exportAgentHistory(agentId, daysBack = 90) {
     startDate.setHours(0, 0, 0, 0); // Start of day
 
     // Query bookings for this agent within the date range
-    // Include all bookings (pending, confirmed, delivered) as they represent demand
-    // Use createdAt as the primary date (when booking was made)
-    // Also check updatedAt for delivered bookings
+    // Exclude cancelled bookings as they don't represent actual demand
+    // Prioritize deliveryDate field when available (scheduled deliveries)
+    // For past bookings, use actual delivery/creation date
     const bookings = await Booking.find({
       agent: new mongoose.Types.ObjectId(agentId),
+      status: { $ne: 'cancelled' }, // Exclude cancelled bookings
       $or: [
         { createdAt: { $gte: startDate, $lte: endDate } },
         { 
           status: 'delivered',
           updatedAt: { $gte: startDate, $lte: endDate }
+        },
+        {
+          deliveryDate: { $gte: startDate, $lte: endDate }
         }
       ]
-    }).select('quantity status updatedAt createdAt');
+    }).select('quantity status updatedAt createdAt deliveryDate');
     
-    console.log(`Found ${bookings.length} bookings for agent ${agentId} in date range`);
+    console.log(`Found ${bookings.length} active bookings for agent ${agentId} in date range`);
 
     // Group bookings by date and sum quantities
+    // Priority: deliveryDate > updatedAt (for delivered) > createdAt
     const dailyDemand = {};
     
     bookings.forEach(booking => {
-      // For delivered bookings, prefer updatedAt (delivery date)
-      // For other bookings, use createdAt (booking date)
-      // This gives us a better picture of actual demand pattern
+      // Skip cancelled bookings (shouldn't happen due to query filter, but double-check)
+      if (booking.status === 'cancelled') {
+        return;
+      }
+      
+      // Determine which date to use for this booking
+      // Priority: deliveryDate (scheduled delivery) > updatedAt (actual delivery) > createdAt (booking made)
       let bookingDate;
-      if (booking.status === 'delivered' && booking.updatedAt) {
-        // Use delivery date for delivered bookings
+      if (booking.deliveryDate) {
+        // Use scheduled delivery date if available (most accurate for future planning)
+        bookingDate = booking.deliveryDate;
+      } else if (booking.status === 'delivered' && booking.updatedAt) {
+        // For delivered bookings without deliveryDate, use updatedAt (actual delivery date)
         bookingDate = booking.updatedAt;
       } else {
-        // Use booking creation date for pending/confirmed bookings
+        // For pending/confirmed bookings without deliveryDate, use createdAt (booking date)
         bookingDate = booking.createdAt;
       }
       
