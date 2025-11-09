@@ -4,6 +4,7 @@ const Cylinder = require('../models/cylinder-model');
 const User = require('../models/user-model');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 
 const paymentCtrl = {};
 
@@ -220,19 +221,89 @@ paymentCtrl.verifyPayment = async (req, res) => {
       });
     }
 
-    const booking = await Booking.findById(bookingId)
-      .populate('cylinder')
-      .populate('customer')
-      .populate('agent');
-
-    if (!booking) {
-      return res.status(404).json({ error: 'Booking not found' });
+    let booking;
+    try {
+      booking = await Booking.findById(bookingId)
+        .populate('cylinder')
+        .populate('customer')
+        .populate('agent');
+    } catch (queryError) {
+      console.error('[Payment Verification] Error fetching booking:', {
+        bookingId: bookingId,
+        error: queryError.message,
+        name: queryError.name
+      });
+      return res.status(500).json({ 
+        error: 'Failed to fetch booking information',
+        details: process.env.NODE_ENV === 'development' ? queryError.message : undefined
+      });
     }
 
+    if (!booking) {
+      console.error('[Payment Verification] Booking not found:', bookingId);
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+    
+    console.log('[Payment Verification] Booking found:', {
+      bookingId: booking._id,
+      hasCustomer: !!booking.customer,
+      hasAgent: !!booking.agent,
+      hasCylinder: !!booking.cylinder,
+      paymentStatus: booking.paymentStatus
+    });
+
     // Check authorization - allow both customer and agent to verify payment
-    const bookingCustomerId = booking.customer?._id || booking.customer;
-    const bookingAgentId = booking.agent?._id || booking.agent;
+    // Handle both populated and non-populated cases
+    let bookingCustomerId;
+    let bookingAgentId;
+    
+    if (booking.customer) {
+      // If populated, it's an object with _id
+      bookingCustomerId = booking.customer._id || booking.customer;
+    } else {
+      // If not populated, it should be in the booking document
+      bookingCustomerId = booking.customer;
+    }
+    
+    if (booking.agent) {
+      bookingAgentId = booking.agent._id || booking.agent;
+    } else {
+      bookingAgentId = booking.agent;
+    }
+    
     const userRole = req.role;
+    
+    // Validate required fields and convert to ObjectId if needed
+    if (!bookingCustomerId) {
+      console.error('[Payment Verification] Booking customer ID is missing:', {
+        bookingId: bookingId,
+        customer: booking.customer,
+        bookingRaw: JSON.stringify(booking.toObject ? booking.toObject() : booking)
+      });
+      return res.status(400).json({ error: 'Booking customer information is missing' });
+    }
+    
+    // Ensure bookingCustomerId is a valid ObjectId
+    if (!mongoose.Types.ObjectId.isValid(bookingCustomerId)) {
+      console.error('[Payment Verification] Invalid customer ID format:', {
+        customerId: bookingCustomerId,
+        type: typeof bookingCustomerId
+      });
+      return res.status(400).json({ error: 'Invalid customer ID format' });
+    }
+    
+    // Convert to ObjectId
+    bookingCustomerId = new mongoose.Types.ObjectId(bookingCustomerId);
+    
+    // Convert agent ID if it exists
+    if (bookingAgentId) {
+      if (!mongoose.Types.ObjectId.isValid(bookingAgentId)) {
+        console.warn('[Payment Verification] Invalid agent ID format, skipping agent:', bookingAgentId);
+        bookingAgentId = null;
+      } else {
+        bookingAgentId = new mongoose.Types.ObjectId(bookingAgentId);
+      }
+    }
     
     const isAuthorized = 
       (userRole === 'customer' && bookingCustomerId?.toString() === userId?.toString()) ||
@@ -250,7 +321,7 @@ paymentCtrl.verifyPayment = async (req, res) => {
     });
 
     if (existingPayment) {
-      console.warn('Duplicate payment attempt detected:', {
+      console.warn('[Payment Verification] Duplicate payment attempt detected:', {
         bookingId,
         paymentId: razorpayPaymentId,
         existingPaymentId: existingPayment._id
@@ -268,33 +339,99 @@ paymentCtrl.verifyPayment = async (req, res) => {
 
     const cylinder = booking.cylinder;
     if (!cylinder || !cylinder.price) {
+      console.error('[Payment Verification] Cylinder or price missing:', {
+        bookingId: bookingId,
+        hasCylinder: !!cylinder,
+        price: cylinder?.price
+      });
       return res.status(400).json({ error: 'Cylinder price not found' });
     }
 
     const amount = cylinder.price * booking.quantity;
+    
+    // Validate amount
+    if (!amount || amount <= 0 || isNaN(amount)) {
+      console.error('[Payment Verification] Invalid amount:', {
+        cylinderPrice: cylinder.price,
+        quantity: booking.quantity,
+        calculatedAmount: amount
+      });
+      return res.status(400).json({ error: 'Invalid payment amount' });
+    }
 
+    console.log('[Payment Verification] Creating payment record:', {
+      bookingId: bookingId,
+      customerId: bookingCustomerId,
+      agentId: bookingAgentId || 'none',
+      amount: amount,
+      method: 'online'
+    });
+
+    // Ensure bookingId is a valid ObjectId
+    if (!mongoose.Types.ObjectId.isValid(bookingId)) {
+      console.error('[Payment Verification] Invalid booking ID format:', bookingId);
+      return res.status(400).json({ error: 'Invalid booking ID format' });
+    }
+    const bookingObjectId = new mongoose.Types.ObjectId(bookingId);
+    
     // Create payment record
     // Note: Payment model method enum only allows "cash" or "online", so use "online" for Razorpay
-    const payment = new Payment({
-      booking: bookingId,
-      customer: bookingCustomerId,
-      agent: bookingAgentId,
-      amount: amount,
+    const paymentData = {
+      booking: bookingObjectId,
+      customer: bookingCustomerId, // Already converted to ObjectId
+      amount: Number(amount), // Ensure it's a number
       method: 'online', // Use 'online' instead of 'razorpay' to match payment model enum
       status: 'completed',
-      razorpayOrderId: razorpayOrderId,
-      razorpayPaymentId: razorpayPaymentId,
-      razorpaySignature: razorpaySignature,
-      transactionID: razorpayPaymentId,
+      razorpayOrderId: String(razorpayOrderId),
+      razorpayPaymentId: String(razorpayPaymentId),
+      razorpaySignature: String(razorpaySignature),
+      transactionID: String(razorpayPaymentId),
       paymentDate: new Date(),
+    };
+    
+    // Only add agent if it exists (agent is optional in payment model)
+    if (bookingAgentId) {
+      paymentData.agent = bookingAgentId; // Already converted to ObjectId
+    }
+    
+    console.log('[Payment Verification] Payment data to save:', {
+      booking: paymentData.booking.toString(),
+      customer: paymentData.customer.toString(),
+      agent: paymentData.agent ? paymentData.agent.toString() : 'none',
+      amount: paymentData.amount,
+      method: paymentData.method,
+      status: paymentData.status
     });
+    
+    const payment = new Payment(paymentData);
 
     try {
       await payment.save();
       console.log('[Payment Verification] Payment saved successfully:', payment._id);
     } catch (saveError) {
-      console.error('[Payment Verification] Error saving payment:', saveError);
-      throw new Error(`Failed to save payment: ${saveError.message}`);
+      console.error('[Payment Verification] Error saving payment:', {
+        error: saveError.message,
+        name: saveError.name,
+        code: saveError.code,
+        errors: saveError.errors,
+        stack: saveError.stack
+      });
+      
+      // Return more specific error message
+      if (saveError.name === 'ValidationError') {
+        const validationErrors = Object.values(saveError.errors || {}).map(err => err.message).join(', ');
+        return res.status(400).json({ 
+          error: 'Payment validation failed',
+          details: process.env.NODE_ENV === 'development' ? validationErrors : undefined
+        });
+      }
+      
+      // For other errors, return 500 with details
+      return res.status(500).json({ 
+        error: 'Failed to save payment',
+        details: process.env.NODE_ENV === 'development' ? saveError.message : undefined,
+        errorName: process.env.NODE_ENV === 'development' ? saveError.name : undefined
+      });
     }
     
     // Update booking payment status
