@@ -24,17 +24,10 @@ const authorizeUser = require('./app/middleware/authorizeUsers');
 
 require('dotenv').config();
 
-app.use(cors({
-  origin: "https://gasco-frontend.vercel.app",
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true
-}));
-
-app.options("*", cors());
 const app = express();
-const port = process.env.PORT || 3090; // Default to 3090 for local development
+const port = process.env.PORT ;
 
+app.use(cors());
 app.use(express.json());
 app.use(fileUpload({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max file size
@@ -137,12 +130,37 @@ app.post("/api/translate/english-to-manglish",authenticateUser,translationCtrl.t
 app.post("/api/translate/detect",authenticateUser,translationCtrl.detectManglish);
 
 //! <--------------------FORECAST ROUTES--------------------> !\\
-// IMPORTANT: More specific routes must come FIRST to avoid route matching conflicts
+  app.get("/api/agents/:agentId/forecast/stats", authenticateUser, authorizeUser(["admin","agent"]), forecastCtrl.getAgentForecastStats);
 
-app.get("/api/agents/:agentId/forecast/stats",authenticateUser,authorizeUser(["admin","agent"]),forecastCtrl.getAgentForecastStats);
-app.get("/api/agents/:agentId/customers/forecasts",authenticateUser,authorizeUser(["admin","agent"]),customerForecastCtrl.getAgentCustomersForecasts);
-app.get("/api/agents/:agentId/forecast",authenticateUser,authorizeUser(["admin","agent"]),forecastCtrl.getAgentForecast);
+  
+  app.get("/api/agents/:agentId/customers/forecasts", authenticateUser, authorizeUser(["admin","agent"]), customerForecastCtrl.getAgentCustomersForecasts);
 
+  
+  app.get("/api/agents/:agentId/forecast", authenticateUser, authorizeUser(["admin","agent"]), forecastCtrl.getAgentForecast);
+
+// 404 handler for unmatched routes
+// Note: This will catch any /api routes that don't match any of the defined routes above
+// app.use((req, res) => {
+//   // This middleware only runs if no route above matched
+//   // For API routes, send JSON 404 response
+//   if (req.path.startsWith('/api')) {
+//     console.log(`[404] ====== Unmatched API route ======`);
+//     console.log(`[404] Method: ${req.method}`);
+//     console.log(`[404] Path: ${req.path}`);
+//     console.log(`[404] Original URL: ${req.originalUrl}`);
+//     console.log(`[404] Query:`, req.query);
+//     console.log(`[404] Params:`, req.params);
+//     return res.status(404).json({ 
+//       error: 'Route not found',
+//       path: req.originalUrl,
+//       method: req.method,
+//       message: `No route found for ${req.method} ${req.originalUrl}`,
+//       hint: 'Check that the route is registered and the HTTP method matches'
+//     });
+//   }
+//   // For non-API routes, send simple 404
+//   res.status(404).send('Not Found');
+// });
 
 app.listen(port,() => {
     console.log("sever running in port",port);
