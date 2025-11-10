@@ -1,7 +1,6 @@
 const jwt = require("jsonwebtoken");
 
 const authenticateUser = (req,res,next) => {
-    // Allow OPTIONS requests to pass through for CORS preflight
     if (req.method === 'OPTIONS') {
         return next();
     }
@@ -18,7 +17,6 @@ const authenticateUser = (req,res,next) => {
         next();
     }catch(err){
         console.error("JWT verification error:", err);
-        // Return 401 for invalid token, not 500
         return res.status(401).json({ error:"Invalid or expired token" })
     }
 };

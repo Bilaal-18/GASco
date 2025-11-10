@@ -485,17 +485,13 @@ userCtrl.remove = async (req,res) => {
 userCtrl.agentCustomers = async (req, res) => {
   try {
     const agentId = req.params.id;
-    
-    // Validate agentId is a valid ObjectId
+
     if (!mongoose.Types.ObjectId.isValid(agentId)) {
       return res.status(400).json({ error: "Invalid agent ID" });
     }
     
-    // Convert to ObjectId for proper query
     const agentObjectId = new mongoose.Types.ObjectId(agentId);
     
-    // Find customers assigned to this agent
-    // The query ensures agent matches exactly
     const customers = await user.find({ 
       agent: agentObjectId, 
       role: "customer"

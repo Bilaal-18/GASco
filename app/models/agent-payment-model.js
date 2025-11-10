@@ -14,32 +14,18 @@ const agentPaymentSchema = new mongoose.Schema(
       required: true,
     },
 
-    /**
-     * ✅ Final amount recorded in this entry.
-     * For online: amount = onlinePaid
-     * For cash: amount = cashPaid
-     */
     amount: {
       type: Number,
       required: true,
       min: 0,
     },
 
-    /**
-     * ✅ Payment method
-     */
     method: {
       type: String,
       enum: ['cash', 'online'],
       required: true,
     },
 
-    /**
-     * ✅ Payment status
-     * - partial → online paid, cash pending
-     * - paid → both online + cash completed
-     * - completed → single payment mode successful
-     */
     status: {
       type: String,
       enum: ['pending', 'completed', 'failed', 'partial', 'paid'],
@@ -51,41 +37,29 @@ const agentPaymentSchema = new mongoose.Schema(
       default: 'Payment to admin',
     },
 
-    /**
-     * ✅ Online payment tracking
-     */
+   
     onlinePaid: {
       type: Number,
       default: 0,
     },
 
-    /**
-     * ✅ Cash tracking after online payment
-     */
     cashPaid: {
       type: Number,
       default: 0,
     },
 
-    /**
-     * ✅ Total amount due (stock amount)
-     */
+    
     totalDue: {
       type: Number,
       default: 0,
     },
 
-    /**
-     * ✅ Remaining cash pending after online payment
-     */
     remainingCash: {
       type: Number,
       default: 0,
     },
 
-    /**
-     * ✅ Razorpay IDs for online payments
-     */
+  
     razorpayOrderId: {
       type: String,
     },
@@ -111,9 +85,6 @@ const agentPaymentSchema = new mongoose.Schema(
       type: String,
     },
 
-    /**
-     * ✅ Stocks that this payment covers
-     */
     stockIds: [
       {
         type: mongoose.Schema.Types.ObjectId,

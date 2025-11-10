@@ -30,7 +30,7 @@ const port = process.env.PORT ;
 app.use(cors());
 app.use(express.json());
 app.use(fileUpload({
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max file size
+  limits: { fileSize: 5 * 1024 * 1024 }, 
   abortOnLimit: true,
   createParentPath: true
 }));
@@ -141,38 +141,14 @@ app.post("/api/translate/detect",authenticateUser,translationCtrl.detectManglish
   
   app.get("/api/agents/:agentId/forecast", authenticateUser, authorizeUser(["admin","agent"]), forecastCtrl.getAgentForecast);
 
-// 404 handler for unmatched routes
-// Note: This will catch any /api routes that don't match any of the defined routes above
-// app.use((req, res) => {
-//   // This middleware only runs if no route above matched
-//   // For API routes, send JSON 404 response
-//   if (req.path.startsWith('/api')) {
-//     console.log(`[404] ====== Unmatched API route ======`);
-//     console.log(`[404] Method: ${req.method}`);
-//     console.log(`[404] Path: ${req.path}`);
-//     console.log(`[404] Original URL: ${req.originalUrl}`);
-//     console.log(`[404] Query:`, req.query);
-//     console.log(`[404] Params:`, req.params);
-//     return res.status(404).json({ 
-//       error: 'Route not found',
-//       path: req.originalUrl,
-//       method: req.method,
-//       message: `No route found for ${req.method} ${req.originalUrl}`,
-//       hint: 'Check that the route is registered and the HTTP method matches'
-//     });
-//   }
-//   // For non-API routes, send simple 404
-//   res.status(404).send('Not Found');
-// });
 
 app.listen(port,() => {
     console.log("sever running in port",port);
     
-    // Forecast cron job is disabled - forecasts are now generated on-demand via refresh button
-    // Uncomment the lines below if you want to re-enable automatic forecast generation
+    
     // setTimeout(() => {
     //     startForecastCron();
-    // }, 3000); // Wait 3 seconds for DB connection
+    // }, 3000);
     console.log("Forecast cron job is disabled. Use refresh button to generate forecasts on-demand.");
 });
 

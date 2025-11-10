@@ -4,26 +4,11 @@ const Booking = require('../models/booking-model');
 const AgentForecast = require('../models/AgentForecast');
 const geminiForecastService = require('../services/geminiForecastService');
 
-/**
- * Forecast Cron Job
- * Runs every 5 minutes to generate fresh forecasts for all agents
- * 
- * Schedule: every 5 minutes (to respect API rate limits)
- * Format: minute hour day month day-of-week
- * Pattern: every 5 minutes
- * 
- * Rate Limiting:
- * - Free tier: 10 requests/minute per model
- * - We limit to 8 requests/minute to stay safe
- * - Forecasts are cached for 1 hour to avoid unnecessary regeneration
- */
 
 let cronJob = null;
-
-// Rate limiting: track API calls per minute
 const rateLimiter = {
   requests: [],
-  maxRequestsPerMinute: 8, // Stay under free tier limit of 10
+  maxRequestsPerMinute: 8, 
   
   /**
    * Check if we can make an API call
@@ -33,16 +18,11 @@ const rateLimiter = {
     const now = Date.now();
     const oneMinuteAgo = now - 60 * 1000;
     
-    // Remove requests older than 1 minute
     this.requests = this.requests.filter(time => time > oneMinuteAgo);
-    
-    // Check if we're under the limit
     return this.requests.length < this.maxRequestsPerMinute;
   },
   
-  /**
-   * Record an API call
-   */
+ 
   recordRequest() {
     this.requests.push(Date.now());
   },
@@ -56,7 +36,7 @@ const rateLimiter = {
       return 0;
     }
     
-    // Find oldest request in the last minute
+  
     const oldestRequest = Math.min(...this.requests);
     const waitTime = (oldestRequest + 60 * 1000) - Date.now();
     return Math.max(0, waitTime);
@@ -70,7 +50,6 @@ const rateLimiter = {
  */
 async function areForecastsFresh(agentId) {
   try {
-    // Check if we have forecasts for today and the next few days
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
@@ -83,10 +62,9 @@ async function areForecastsFresh(agentId) {
     }).sort({ createdAt: -1 });
     
     if (!forecast) {
-      return false; // No forecast found, need to generate
+      return false; 
     }
     
-    // Check if forecast was created within the last hour
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
     const isFresh = forecast.createdAt > oneHourAgo;
     
@@ -97,7 +75,7 @@ async function areForecastsFresh(agentId) {
     return isFresh;
   } catch (error) {
     console.error(`[Cron] Error checking forecast freshness for agent ${agentId}:`, error);
-    return false; // On error, assume we need to regenerate
+    return false;
   }
 }
 
@@ -109,21 +87,18 @@ async function areForecastsFresh(agentId) {
  */
 async function generateForecastForAgent(agentId, horizon = 7) {
   try {
-    // Check if forecasts are still fresh (skip if recent)
     const fresh = await areForecastsFresh(agentId);
     if (fresh) {
       console.log(`[Cron] Skipping agent ${agentId} - forecasts are still fresh`);
       return { success: true, agentId, skipped: true, reason: 'fresh' };
     }
     
-    // Wait if we're at rate limit
     const waitTime = rateLimiter.getWaitTime();
     if (waitTime > 0) {
       console.log(`[Cron] Rate limit reached. Waiting ${Math.ceil(waitTime / 1000)} seconds before generating forecast for agent ${agentId}...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
     
-    // Check rate limit again after waiting
     if (!rateLimiter.canMakeRequest()) {
       console.warn(`[Cron] Still at rate limit after waiting. Skipping agent ${agentId} for this cycle.`);
       return { success: false, agentId, skipped: true, reason: 'rate_limit' };
@@ -131,13 +106,12 @@ async function generateForecastForAgent(agentId, horizon = 7) {
     
     console.log(`[Cron] Generating forecast for agent ${agentId}...`);
     
-    // Record API call
+  
     rateLimiter.recordRequest();
     
-    // Generate forecast using Gemini AI (7 days forecast, 60 days history)
     const forecasts = await geminiForecastService.generateForecast(agentId, horizon, 60);
     
-    // Get upcoming scheduled bookings to merge with predictions
+    
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const endDate = new Date(today);
@@ -153,32 +127,23 @@ async function generateForecastForAgent(agentId, horizon = 7) {
       }
     }).select('quantity deliveryDate');
     
-    // Create map of scheduled bookings by date
     const scheduledByDate = {};
     upcomingBookings.forEach(booking => {
       const dateKey = booking.deliveryDate.toISOString().split('T')[0];
       scheduledByDate[dateKey] = (scheduledByDate[dateKey] || 0) + booking.quantity;
     });
-    
-    // Prepare forecasts for database
-    // suggestedStock = scheduled + p95 (total needed including safety buffer)
+  
     const totalScheduled = Object.values(scheduledByDate).reduce((sum, qty) => sum + qty, 0);
     const isLowActivity = totalScheduled <= 3;
     
     const forecastsToSave = forecasts.map(forecast => {
       const scheduledQty = scheduledByDate[forecast.date] || 0;
-      // Total needed = scheduled deliveries + predicted additional demand at 95th percentile
       const totalNeeded = scheduledQty + forecast.p95;
-      
-      // For low activity, use minimal buffer; for normal activity, add 5% buffer
       let suggestedStock;
       if (isLowActivity && totalNeeded <= 3) {
-            // Very low activity: round to nearest integer (minimal buffer)
-            suggestedStock = Math.round(totalNeeded * 1.02); // 2% buffer max
-            // Ensure at least the scheduled amount
+            suggestedStock = Math.round(totalNeeded * 1.02); 
             suggestedStock = Math.max(suggestedStock, scheduledQty);
           } else {
-            // Normal activity: add 5% buffer
             suggestedStock = Math.ceil(totalNeeded * 1.05);
           }
       
@@ -192,7 +157,7 @@ async function generateForecastForAgent(agentId, horizon = 7) {
       };
     });
     
-    // Use bulkWrite with upsert to update existing or create new forecasts
+  
     const bulkOps = forecastsToSave.map(forecast => ({
       updateOne: {
         filter: {
@@ -216,34 +181,26 @@ async function generateForecastForAgent(agentId, horizon = 7) {
   }
 }
 
-/**
- * Main cron job function
- * Generates forecasts for all agents with delivery history
- */
+
 async function runForecastCron() {
   const startTime = new Date();
   console.log(`[Cron] Starting forecast generation job at ${startTime.toISOString()}`);
   
   try {
-    // Check if MongoDB is connected
     if (mongoose.connection.readyState !== 1) {
       console.error('[Cron] MongoDB is not connected. Skipping forecast generation.');
       return;
     }
-    
-    // Throttle: Only run if last run completed more than 4 minutes ago
-    // This prevents overlapping executions and ensures we respect rate limits
+
     if (runForecastCron.lastRunTime) {
       const timeSinceLastRun = Date.now() - runForecastCron.lastRunTime;
-      const minInterval = 4 * 60 * 1000; // 4 minutes minimum interval
+      const minInterval = 4 * 60 * 1000; 
       if (timeSinceLastRun < minInterval) {
         console.log(`[Cron] Skipping forecast generation - last run was ${Math.round(timeSinceLastRun / 1000 / 60)} minutes ago`);
         return;
       }
     }
     
-    // Get all unique agent IDs from bookings (last 60 days)
-    // Include all bookings (pending, confirmed, delivered) to get accurate demand patterns
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - 60);
     cutoffDate.setHours(0, 0, 0, 0);
@@ -288,21 +245,17 @@ async function runForecastCron() {
         processed++;
       }
       
-      // Add delay between API requests to stay under rate limit
-      // Only delay if we actually made an API call (not skipped)
-      // Space requests to stay well under 10 requests/minute
-      const delayBetweenRequests = 8000; // 8 seconds = ~7.5 requests/minute
+      const delayBetweenRequests = 8000; 
       await new Promise(resolve => setTimeout(resolve, delayBetweenRequests));
     }
     
-    // Calculate statistics
     const successful = results.filter(r => r.success && !r.skipped).length;
     const failed = results.filter(r => !r.success && !r.skipped).length;
     const skippedCount = results.filter(r => r.skipped).length;
     
     const endTime = new Date();
-    const duration = (endTime - startTime) / 1000; // Duration in seconds
-    runForecastCron.lastRunTime = Date.now(); // Update last run time after completion
+    const duration = (endTime - startTime) / 1000; 
+    runForecastCron.lastRunTime = Date.now(); 
     
     console.log(`[Cron] Forecast generation job completed in ${duration.toFixed(2)} seconds`);
     console.log(`[Cron] Results: ${successful} generated, ${skippedCount} skipped, ${failed} failed`);
@@ -312,28 +265,21 @@ async function runForecastCron() {
     }
   } catch (error) {
     console.error('[Cron] Error in forecast generation job:', error);
-    runForecastCron.lastRunTime = Date.now(); // Update even on error
+    runForecastCron.lastRunTime = Date.now(); 
   }
 }
 
-/**
- * Start the forecast cron job
- * Schedule: Every 5 minutes
- */
 function startForecastCron() {
   if (cronJob) {
     console.log('[Cron] Forecast cron job is already running.');
     return;
   }
   
-  // Schedule: Every 5 minutes
-  // Format: minute hour day month day-of-week
-  // '*/5 * * * *' means: every 5 minutes
   cronJob = cron.schedule('*/5 * * * *', async () => {
     await runForecastCron();
   }, {
     scheduled: true,
-    timezone: 'Asia/Kolkata' // Adjust timezone as needed
+    timezone: 'Asia/Kolkata' 
   });
   
   console.log('[Cron] Forecast cron job scheduled: Running every 5 minutes');
@@ -341,9 +287,7 @@ function startForecastCron() {
   console.log('[Cron] Forecast caching: Forecasts are cached for 1 hour to avoid unnecessary regeneration');
 }
 
-/**
- * Stop the forecast cron job
- */
+
 function stopForecastCron() {
   if (cronJob) {
     cronJob.stop();
@@ -352,9 +296,6 @@ function stopForecastCron() {
   }
 }
 
-/**
- * Manually trigger forecast generation (for testing or manual runs)
- */
 async function triggerForecastGeneration() {
   console.log('[Cron] Manual forecast generation triggered');
   await runForecastCron();

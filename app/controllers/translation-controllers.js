@@ -2,20 +2,17 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const translationCtrl = {};
 
-// Initialize Gemini AI with fallback models
 const getGeminiModel = (preferredModel = null) => {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY not configured");
   }
 
-  // Try preferred model first, then fallback to faster models
   const modelName = process.env.GEMINI_MODEL || "gemini-2.5-flash";
   const genAI = new GoogleGenerativeAI(apiKey);
   return genAI.getGenerativeModel({ model: modelName });
 };
 
-// Retry function with exponential backoff
 const retryWithBackoff = async (fn, maxRetries = 3, initialDelay = 1000) => {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
@@ -28,7 +25,6 @@ const retryWithBackoff = async (fn, maxRetries = 3, initialDelay = 1000) => {
         throw error;
       }
       
-      // Exponential backoff: 1s, 2s, 4s
       const delay = initialDelay * Math.pow(2, attempt);
       console.log(`Model overloaded, retrying in ${delay}ms... (attempt ${attempt + 1}/${maxRetries})`);
       await new Promise(resolve => setTimeout(resolve, delay));
@@ -36,7 +32,6 @@ const retryWithBackoff = async (fn, maxRetries = 3, initialDelay = 1000) => {
   }
 };
 
-// Translate Manglish to English
 translationCtrl.translateManglishToEnglish = async (req, res) => {
   try {
     const { text } = req.body;
@@ -59,7 +54,6 @@ IMPORTANT RULES:
 
 English translation:`;
 
-    // Try with preferred model, fallback to flash if overloaded
     const translatedText = await retryWithBackoff(async () => {
       try {
         const model = getGeminiModel();
@@ -67,7 +61,6 @@ English translation:`;
         const response = await result.response;
         return response.text().trim();
       } catch (error) {
-        // If overloaded, try with flash model
         if (error.status === 503 || error.message?.includes("overloaded")) {
           console.log("Primary model overloaded, trying gemini-2.5-flash...");
           const flashModel = getGeminiModel("gemini-2.5-flash");
@@ -93,7 +86,6 @@ English translation:`;
   }
 };
 
-// Translate English to Manglish
 translationCtrl.translateEnglishToManglish = async (req, res) => {
   try {
     const { text } = req.body;
@@ -118,7 +110,7 @@ CRITICAL RULES:
 
 Manglish translation:`;
 
-    // Try with preferred model, fallback to flash if overloaded
+
     const translatedText = await retryWithBackoff(async () => {
       try {
         const model = getGeminiModel();
@@ -126,7 +118,6 @@ Manglish translation:`;
         const response = await result.response;
         return response.text().trim();
       } catch (error) {
-        // If overloaded, try with flash model
         if (error.status === 503 || error.message?.includes("overloaded")) {
           console.log("Primary model overloaded, trying gemini-2.5-flash...");
           const flashModel = getGeminiModel("gemini-2.5-flash");
@@ -152,7 +143,7 @@ Manglish translation:`;
   }
 };
 
-// Detect if text is Manglish
+
 translationCtrl.detectManglish = async (req, res) => {
   try {
     const { text } = req.body;
@@ -170,7 +161,7 @@ English examples: "what is my booking status", "my cylinder is not delivered", "
 
 Respond with ONLY "manglish" or "english" (lowercase, no other text, no explanations):`;
 
-    // Try with preferred model, fallback to flash if overloaded
+  
     const detection = await retryWithBackoff(async () => {
       try {
         const model = getGeminiModel();
@@ -178,7 +169,7 @@ Respond with ONLY "manglish" or "english" (lowercase, no other text, no explanat
         const response = await result.response;
         return response.text().trim().toLowerCase();
       } catch (error) {
-        // If overloaded, try with flash model
+      
         if (error.status === 503 || error.message?.includes("overloaded")) {
           console.log("Primary model overloaded, trying gemini-2.5-flash...");
           const flashModel = getGeminiModel("gemini-2.5-flash");
@@ -200,7 +191,6 @@ Respond with ONLY "manglish" or "english" (lowercase, no other text, no explanat
   } catch (error) {
     console.error("Detection error:", error);
     
-    // Fallback: simple heuristic detection if Gemini fails
     const manglishIndicators = ["entha", "ningalude", "ente", "ippo", "ini", "aayittilla", "varum", "kannu", "ningal"];
     const words = text.toLowerCase().split(/\s+/);
     const isManglish = words.some(word => manglishIndicators.includes(word));

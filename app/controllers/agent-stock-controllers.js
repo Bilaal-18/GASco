@@ -166,9 +166,7 @@ agentStockCtrl.deleteStock = async (req, res) => {
     const userRole = req.role;
     const authenticatedUserId = req.UserId;
 
-    // Check authorization: admin can delete any stock, agent can only delete their own stock
     if (userRole === 'agent') {
-      // Agent can only delete their own stock
       if (authenticatedUserId.toString() !== agentId.toString()) {
         return res.status(403).json({ error: "You can only delete your own stock" });
       }
@@ -265,7 +263,6 @@ agentStockCtrl.getStats = async (req, res) => {
   }
 
   try {
-    // Get agent stocks
     const stocks = await agentStock.find({ agentId }).populate("cylinderId", "price");
     
     const bookings = await Booking.find({ agent: agentId })
@@ -304,9 +301,6 @@ agentStockCtrl.getStats = async (req, res) => {
       pendingPayments,
     };
 
-    console.log(`Stats for agent ${agentId}:`, stats);
-    console.log(`Found ${stocks.length} stocks and ${bookings.length} bookings`);
-
     res.json(stats);
   } catch (err) {
     console.error("Error in getStats:", err);
@@ -325,7 +319,6 @@ agentStockCtrl.getCustomerAgentCylinders = async (req, res) => {
       return res.status(403).json({ error: 'Only customers can access this endpoint' });
     }
 
-    // Get customer's assigned agent
     const User = require('../models/user-model');
     const customer = await User.findById(customerId);
     
@@ -339,20 +332,20 @@ agentStockCtrl.getCustomerAgentCylinders = async (req, res) => {
       });
     }
 
-    // Get agent stock with quantity > 0
+    
     const agentStocks = await agentStock.find({ 
       agentId: customer.agent,
-      quantity: { $gt: 0 } // Only stocks with quantity > 0
+      quantity: { $gt: 0 } 
     }).populate('cylinderId', 'cylinderName cylinderType weight price');
 
-    // Format as cylinders with available quantities
+  
     const cylinders = agentStocks.map(stock => ({
       _id: stock.cylinderId._id,
       cylinderName: stock.cylinderId.cylinderName,
       cylinderType: stock.cylinderId.cylinderType,
       weight: stock.cylinderId.weight,
       price: stock.cylinderId.price,
-      totalQuantity: stock.quantity, // Available quantity in agent's stock
+      totalQuantity: stock.quantity, 
     }));
 
     res.status(200).json({

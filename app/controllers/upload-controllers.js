@@ -1,11 +1,12 @@
 const cloudinary = require('../../config/cloudinary');
+const fs = require('fs');
 
 const uploadCtrl = {};
 
-// Upload profile image to Cloudinary
+//! <--------------------UPLOAD IMAGE TO CLOUDINARY--------------------> !\\
+
 uploadCtrl.uploadProfileImage = async (req, res) => {
   try {
-    // Check if file was uploaded
     if (!req.files || !req.files.image) {
       console.log('No file in request:', req.files);
       return res.status(400).json({ error: 'No image file provided' });
@@ -13,26 +14,20 @@ uploadCtrl.uploadProfileImage = async (req, res) => {
 
     const imageFile = req.files.image;
     
-    // Validate file type
     const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
     if (!allowedTypes.includes(imageFile.mimetype)) {
       return res.status(400).json({ error: 'Invalid file type. Only JPEG, PNG, GIF, and WebP images are allowed.' });
     }
-
-    // Validate file size (max 5MB)
-    const maxSize = 5 * 1024 * 1024; // 5MB
+    const maxSize = 5 * 1024 * 1024; 
     if (imageFile.size > maxSize) {
       return res.status(400).json({ error: 'File size too large. Maximum size is 5MB.' });
     }
 
-    // Get file data (express-fileupload uses in-memory mode by default)
     let fileData;
     if (imageFile.data) {
-      // In-memory mode - data is a Buffer
       fileData = imageFile.data;
     } else if (imageFile.tempFilePath) {
-      // Temp file mode - read the file
-      const fs = require('fs');
+      
       fileData = fs.readFileSync(imageFile.tempFilePath);
     } else {
       console.error('Invalid file data structure:', {
@@ -44,7 +39,6 @@ uploadCtrl.uploadProfileImage = async (req, res) => {
       return res.status(400).json({ error: 'Invalid file data. Please try again.' });
     }
 
-    // Upload to Cloudinary
     const uploadResult = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
@@ -83,7 +77,8 @@ uploadCtrl.uploadProfileImage = async (req, res) => {
   }
 };
 
-// Delete image from Cloudinary
+//! <--------------------DELETE IMAGE TO CLOUDINARY--------------------> !\\
+
 uploadCtrl.deleteImage = async (req, res) => {
   try {
     const { publicId } = req.body;

@@ -17,30 +17,23 @@ bookingCtrl.NewBooking = async (req, res) => {
     console.log(`NewBooking request - Role: ${userRole}, UserId: ${userId}`);
     console.log(`Request body:`, { quantity, cylinderId, paymentMethod, deliveryDate, requestedCustomerId });
     
-    // Determine customerId based on user role
     let customerId;
     let agentId;
     
     if (userRole === "agent") {
-      // Agent is booking on behalf of a customer
       if (!requestedCustomerId) {
         return res.status(400).json({ error: "Customer ID is required when booking as agent" });
       }
       
-      // Validate customerId format
       if (!mongoose.Types.ObjectId.isValid(requestedCustomerId)) {
         return res.status(400).json({ error: "Invalid customer ID format" });
       }
       
       customerId = requestedCustomerId;
-      agentId = userId; // Agent is the logged-in user
+      agentId = userId; 
       
-      console.log(`Agent ${agentId} booking for customer ${customerId}`);
     } else if (userRole === "customer") {
-      // Customer is booking for themselves
       customerId = userId;
-      // Agent will be determined from customer's assigned agent
-      console.log(`Customer ${customerId} booking for themselves`);
     } else {
       return res.status(403).json({ error: "Unauthorized: Only agents and customers can create bookings" });
     }
@@ -54,7 +47,6 @@ bookingCtrl.NewBooking = async (req, res) => {
     if (paymentMethod && !["online", "cash"].includes(paymentMethod)) {
       return res.status(400).json({ error: "Payment method must be 'online' or 'cash'" });
     }
-    // Validate delivery date if provided
     if (deliveryDate) {
       const delivery = new Date(deliveryDate);
       const today = new Date();
@@ -64,9 +56,7 @@ bookingCtrl.NewBooking = async (req, res) => {
       }
     }
 
-    // If agent is booking, verify the customer is assigned to them FIRST
     if (userRole === "agent") {
-      // Convert agentId to ObjectId for reliable query
       const agentObjectId = mongoose.Types.ObjectId.isValid(agentId) 
         ? new mongoose.Types.ObjectId(agentId) 
         : agentId;
@@ -74,22 +64,12 @@ bookingCtrl.NewBooking = async (req, res) => {
         ? new mongoose.Types.ObjectId(customerId) 
         : customerId;
       
-      console.log(`Checking customer assignment:`);
-      console.log(`  Customer ID: ${customerId} (${customerObjectId})`);
-      console.log(`  Agent ID: ${agentId} (${agentObjectId})`);
-      
-      // First, check if customer exists
       const customerExists = await User.findById(customerObjectId);
       if (!customerExists) {
         console.error(`Customer ${customerId} not found in database`);
         return res.status(404).json({ error: "Customer not found" });
       }
       
-      console.log(`Customer found: ${customerExists.username || customerExists.email}`);
-      console.log(`Customer's agent field: ${customerExists.agent}`);
-      console.log(`Customer's agent type: ${customerExists.agent ? customerExists.agent.constructor.name : 'null'}`);
-      
-      // Check if customer has an agent assigned
       if (!customerExists.agent) {
         console.error(`Customer ${customerId} has no agent assigned`);
         return res.status(400).json({ 
@@ -97,16 +77,9 @@ bookingCtrl.NewBooking = async (req, res) => {
         });
       }
       
-      // Compare agent IDs - convert both to strings for comparison
       const customerAgentIdStr = customerExists.agent.toString();
       const loggedInAgentIdStr = agentObjectId.toString();
       
-      console.log(`Comparing agents:`);
-      console.log(`  Customer's agent: ${customerAgentIdStr}`);
-      console.log(`  Logged in agent: ${loggedInAgentIdStr}`);
-      console.log(`  Match: ${customerAgentIdStr === loggedInAgentIdStr}`);
-      
-      // Verify by querying: if customer is assigned to this agent, the query will find them
       const customerAssigned = await User.findOne({ 
         _id: customerObjectId, 
         agent: agentObjectId,
@@ -114,7 +87,6 @@ bookingCtrl.NewBooking = async (req, res) => {
       });
       
       if (!customerAssigned) {
-        // Customer exists and has an agent, but it's not the logged-in agent
         console.error(`Customer ${customerId} is NOT assigned to agent ${agentId}`);
         console.error(`  Customer's actual agent: ${customerAgentIdStr}`);
         console.error(`  Logged in agent: ${loggedInAgentIdStr}`);
@@ -122,13 +94,11 @@ bookingCtrl.NewBooking = async (req, res) => {
           error: "This customer is not assigned to your account. Please select a customer from the list that is assigned to you." 
         });
       }
-      
-      // Customer is verified and assigned - use this customer record
+
       const customer = customerAssigned;
       agentId = customer.agent;
       console.log(`✓ Verified: Customer ${customerId} (${customer.username || customer.email}) is assigned to agent ${agentId}`);
-      
-      // Check if customer has agent assigned (should always be true at this point, but double-check)
+    
       if (!customer.agent) {
         console.error(`Data inconsistency: Customer ${customerId} found in query but agent field is null`);
         return res.status(500).json({ 
@@ -136,14 +106,12 @@ bookingCtrl.NewBooking = async (req, res) => {
         });
       }
     } else {
-      // Customer is booking for themselves
       const customer = await User.findById(customerId);
       if (!customer) {
         console.error(`Customer not found: ${customerId}`);
         return res.status(404).json({ error: "Customer not found" });
       }
       
-      // Check if customer has agent assigned
       if (!customer.agent) {
         console.error(`Customer ${customerId} (${customer.username || customer.email}) does not have an agent assigned`);
         return res.status(400).json({ 
@@ -151,12 +119,10 @@ bookingCtrl.NewBooking = async (req, res) => {
         });
       }
       
-      // Use their assigned agent
       agentId = customer.agent;
       console.log(`Customer booking for themselves - Using agent: ${agentId}`);
     }
 
-    // Validate cylinder
     if (!mongoose.Types.ObjectId.isValid(cylinderId)) {
       return res.status(400).json({ error: "Invalid cylinder ID format" });
     }
@@ -167,7 +133,6 @@ bookingCtrl.NewBooking = async (req, res) => {
       return res.status(404).json({ error: "Cylinder not found" });
     }
 
-    // Validate agentId before querying stock
     const agentIdForStock = mongoose.Types.ObjectId.isValid(agentId) 
       ? new mongoose.Types.ObjectId(agentId) 
       : agentId;
@@ -201,12 +166,10 @@ bookingCtrl.NewBooking = async (req, res) => {
 
     await booking.save();
 
-    // Update agent stock
     agentStock.quantity -= quantity;
     agentStock.lastUpdated = Date.now();
     await agentStock.save();
 
-    // Populate booking data for response
     const populatedBooking = await Booking.findById(booking._id)
       .populate("customer", "username businessName phoneNo email")
       .populate("agent", "agentname phoneNo")
@@ -218,7 +181,6 @@ bookingCtrl.NewBooking = async (req, res) => {
     console.error("Error stack:", err.stack);
     console.error("Error message:", err.message);
     
-    // Return appropriate error based on error type
     if (err.name === 'ValidationError') {
       return res.status(400).json({ error: "Validation error", details: err.message });
     }
@@ -226,7 +188,6 @@ bookingCtrl.NewBooking = async (req, res) => {
       return res.status(400).json({ error: "Invalid ID format", details: err.message });
     }
     
-    // Default error response
     res.status(500).json({ 
       error: "Error making the booking",
       details: err.message || "An unexpected error occurred"

@@ -3,13 +3,7 @@ const { exportAgentHistory } = require('../ml/exportAgentHistory');
 const Booking = require('../models/booking-model');
 const mongoose = require('mongoose');
 
-/**
- * Gemini Forecast Service
- * Uses Google Gemini AI to generate demand forecasts for agents
- * Processes historical booking data and returns structured forecast predictions
- */
 
-// Initialize Gemini AI client
 let genAI;
 try {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -37,7 +31,6 @@ async function getUpcomingBookings(agentId, horizon = 7) {
     endDate.setDate(endDate.getDate() + horizon);
     endDate.setHours(23, 59, 59, 999);
     
-    // Get upcoming bookings with deliveryDate (scheduled deliveries)
     const upcomingBookings = await Booking.find({
       agent: new mongoose.Types.ObjectId(agentId),
       status: { $ne: 'cancelled' },
@@ -47,7 +40,6 @@ async function getUpcomingBookings(agentId, horizon = 7) {
       }
     }).select('quantity deliveryDate status');
     
-    // Also get pending/confirmed bookings without deliveryDate (assume they'll be delivered soon)
     const pendingBookings = await Booking.find({
       agent: new mongoose.Types.ObjectId(agentId),
       status: { $in: ['pending', 'confirmed'] },
@@ -56,14 +48,11 @@ async function getUpcomingBookings(agentId, horizon = 7) {
         { deliveryDate: { $exists: false } }
       ],
       createdAt: {
-        $gte: new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000) // Last 7 days
+        $gte: new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000) 
       }
     }).select('quantity createdAt status');
     
-    // Group by date
     const upcomingByDate = {};
-    
-    // Process scheduled deliveries
     upcomingBookings.forEach(booking => {
       const dateKey = booking.deliveryDate.toISOString().split('T')[0];
       if (!upcomingByDate[dateKey]) {
@@ -72,14 +61,11 @@ async function getUpcomingBookings(agentId, horizon = 7) {
       upcomingByDate[dateKey] += booking.quantity || 0;
     });
     
-    // Process pending bookings without deliveryDate (assume delivery within 1-2 days)
     pendingBookings.forEach(booking => {
-      // If no deliveryDate, assume delivery tomorrow or day after
       const bookingDate = new Date(booking.createdAt);
       const tomorrow = new Date(today);
       tomorrow.setDate(tomorrow.getDate() + 1);
       
-      // Use tomorrow if booking was made today, otherwise use day after
       const assumedDeliveryDate = bookingDate.toDateString() === today.toDateString() 
         ? tomorrow 
         : new Date(tomorrow.getTime() + 24 * 60 * 60 * 1000);
@@ -92,8 +78,7 @@ async function getUpcomingBookings(agentId, horizon = 7) {
         upcomingByDate[dateKey] += booking.quantity || 0;
       }
     });
-    
-    // Convert to array format
+  
     return Object.entries(upcomingByDate).map(([date, qty]) => ({ date, qty }));
   } catch (error) {
     console.error(`Error getting upcoming bookings for agent ${agentId}:`, error);
@@ -110,14 +95,12 @@ async function getUpcomingBookings(agentId, horizon = 7) {
  * @returns {string} Formatted prompt for Gemini
  */
 function buildForecastPrompt(history, upcomingBookings = [], horizon = 7) {
-  // Get recent booking patterns (last 7 days) - critical for immediate prediction
   const recent7Days = history.slice(-7);
   const todayQty = recent7Days.length > 0 ? recent7Days[recent7Days.length - 1].qty : 0;
   const yesterdayQty = recent7Days.length > 1 ? recent7Days[recent7Days.length - 2].qty : 0;
   const last3DaysAvg = recent7Days.slice(-3).reduce((sum, h) => sum + h.qty, 0) / Math.max(recent7Days.slice(-3).length, 1);
   const last7DaysAvg = recent7Days.reduce((sum, h) => sum + h.qty, 0) / Math.max(recent7Days.length, 1);
   
-  // Calculate basic statistics from history (only non-zero days)
   const quantities = history.map(h => h.qty).filter(q => q > 0);
   const daysWithDemand = quantities.length;
   const avgDemand = quantities.length > 0 
@@ -126,27 +109,23 @@ function buildForecastPrompt(history, upcomingBookings = [], horizon = 7) {
   const maxDemand = quantities.length > 0 ? Math.max(...quantities) : 0;
   const minDemand = quantities.length > 0 ? Math.min(...quantities) : 0;
   
-  // Get the last date in history
   const lastDate = history.length > 0 ? history[history.length - 1].date : new Date().toISOString().split('T')[0];
   
-  // Format recent history data for prompt (show last 14 days for context)
   const recentHistory = history.slice(-14);
   const historyText = recentHistory
     .map(h => `${h.date}: ${h.qty} cylinders`)
     .join('\n');
   
-  // Format upcoming scheduled bookings
   const upcomingText = upcomingBookings.length > 0
     ? upcomingBookings.map(b => `${b.date}: ${b.qty} cylinders (already scheduled)`).join('\n')
     : 'No scheduled deliveries found';
 
-  // Calculate total already scheduled for the forecast period
   const totalScheduled = upcomingBookings.reduce((sum, b) => sum + b.qty, 0);
   
-  // Determine prediction strategy based on data availability
+
   const hasRecentActivity = todayQty > 0 || yesterdayQty > 0 || last3DaysAvg > 0;
   const hasScheduledBookings = upcomingBookings.length > 0;
-  const hasSufficientHistory = daysWithDemand >= 5; // At least 5 days with actual demand
+  const hasSufficientHistory = daysWithDemand >= 5; 
   
   const prompt = `You are an expert demand forecasting AI for a commercial LPG (Liquefied Petroleum Gas) cylinder distribution business.
 
@@ -229,14 +208,11 @@ Generate the forecast now (remember: p50/p80/p95 should NOT include already sche
  */
 function parseGeminiResponse(responseText) {
   try {
-    // Try to extract JSON from the response
-    // Gemini sometimes wraps JSON in markdown code blocks or adds text
+
     let jsonText = responseText.trim();
-    
-    // Remove markdown code blocks if present
+  
     jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '');
     
-    // Try to find JSON array in the response
     const jsonMatch = jsonText.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
       jsonText = jsonMatch[0];
@@ -244,37 +220,28 @@ function parseGeminiResponse(responseText) {
     
     const forecast = JSON.parse(jsonText);
     
-    // Validate forecast structure
     if (!Array.isArray(forecast)) {
       throw new Error('Forecast must be an array');
     }
     
-    // Validate each forecast entry
     forecast.forEach((entry, index) => {
-      // Check for missing or null/undefined values (but allow 0 as a valid value)
       if (!entry.date || entry.p50 === undefined || entry.p50 === null || 
           entry.p80 === undefined || entry.p80 === null || 
           entry.p95 === undefined || entry.p95 === null) {
         throw new Error(`Invalid forecast entry at index ${index}: missing required fields`);
       }
       
-      // Ensure p80 and p95 match the formula (but only if p50 > 0, otherwise keep them at 0)
-      // Updated buffers: p80 = p50 * 1.1, p95 = p50 * 1.2 (more conservative)
       let expectedP80, expectedP95;
       if (entry.p50 > 0) {
         expectedP80 = Math.round(entry.p50 * 1.1);
         expectedP95 = Math.round(entry.p50 * 1.2);
       } else {
-        // If p50 is 0, p80 and p95 should also be 0
         expectedP80 = 0;
         expectedP95 = 0;
       }
-      
-      // Use calculated values to ensure consistency
       entry.p80 = expectedP80;
       entry.p95 = expectedP95;
       
-      // Ensure all values are non-negative integers
       entry.p50 = Math.max(0, Math.round(entry.p50));
       entry.p80 = Math.max(0, Math.round(entry.p80));
       entry.p95 = Math.max(0, Math.round(entry.p95));
@@ -297,13 +264,12 @@ function parseGeminiResponse(responseText) {
  * @returns {Promise<Array>} Forecast array: [{ date: "YYYY-MM-DD", p50, p80, p95 }, ...]
  */
 async function generateForecast(agentId, horizon = 7, historyDays = 60) {
-  let history = []; // Declare history outside try block for error handler access
+  let history = []; 
   try {
     if (!genAI) {
       throw new Error('Gemini AI is not initialized. Check GEMINI_API_KEY environment variable.');
     }
 
-    // Step 1: Export agent history and get upcoming bookings
     console.log(`Generating forecast for agent ${agentId} with ${horizon} day horizon...`);
     history = await exportAgentHistory(agentId, historyDays);
     const upcomingBookings = await getUpcomingBookings(agentId, horizon);
@@ -316,15 +282,12 @@ async function generateForecast(agentId, horizon = 7, historyDays = 60) {
     
     if (!history || history.length === 0) {
       console.warn(`No history found for agent ${agentId}. Generating default forecast.`);
-      // Generate a default forecast that accounts for upcoming bookings
       return generateDefaultForecast(horizon, [], upcomingBookings);
     }
 
-    // Step 2: Build prompt (includes upcoming bookings)
+
     const prompt = buildForecastPrompt(history, upcomingBookings, horizon);
     
-    // Step 3: Call Gemini API
-    // Use model from environment variable, with fallbacks
     const preferredModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
     const fallbackModels = ['gemini-2.0-flash-exp', 'gemini-1.5-flash', 'gemini-1.5-pro'];
     const modelNames = [preferredModel, ...fallbackModels.filter(m => m !== preferredModel)];
@@ -345,73 +308,60 @@ async function generateForecast(agentId, horizon = 7, historyDays = 60) {
         response = await result.response;
         responseText = response.text();
         console.log(`Successfully used model: ${modelName}`);
-        break; // Success, exit loop
+        break; 
       } catch (error) {
         lastError = error;
         const errorMessage = error.message || '';
         
-        // Handle rate limit errors (429) with exponential backoff
         if (errorMessage.includes('429') || errorMessage.includes('Too Many Requests') || errorMessage.includes('quota')) {
           console.warn(`Model ${modelName} rate limited. Waiting before trying next model...`);
-          
-          // Extract retry delay from error if available, otherwise use 60 seconds
-          let retryDelay = 60000; // Default: 60 seconds
+        
+          let retryDelay = 60000;
           try {
             const retryMatch = errorMessage.match(/retry in (\d+\.?\d*)s/i);
             if (retryMatch) {
               retryDelay = Math.ceil(parseFloat(retryMatch[1]) * 1000);
             }
           } catch (e) {
-            // Ignore parsing errors, use default
           }
           
           console.log(`Waiting ${Math.ceil(retryDelay / 1000)} seconds before trying next model...`);
           await new Promise(resolve => setTimeout(resolve, retryDelay));
           
-          // Don't continue to next model immediately after rate limit - wait is already done
-          // Continue to next model in the list
           continue;
         }
         
         console.warn(`Model ${modelName} failed:`, error.message);
-        // Continue to next model
         continue;
       }
     }
     
     if (!responseText) {
-      // All models failed, throw the last error
       throw new Error(`All Gemini models failed. Last error: ${lastError?.message || 'Unknown error'}`);
     }
     
-    // Step 4: Parse response
     let forecast = parseGeminiResponse(responseText);
     
-    // Step 5: Validate forecast dates and merge with scheduled bookings
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
-    // Create a map of scheduled bookings by date
     const scheduledByDate = {};
     const totalScheduled = upcomingBookings.reduce((sum, b) => sum + b.qty, 0);
     upcomingBookings.forEach(b => {
       scheduledByDate[b.date] = (scheduledByDate[b.date] || 0) + b.qty;
     });
     
-    // Get recent patterns for adjustment
     const recent7Days = history.slice(-7);
     const todayQty = recent7Days.length > 0 ? recent7Days[recent7Days.length - 1].qty : 0;
     const yesterdayQty = recent7Days.length > 1 ? recent7Days[recent7Days.length - 2].qty : 0;
     const last3DaysAvg = recent7Days.slice(-3).reduce((sum, h) => sum + h.qty, 0) / Math.max(recent7Days.slice(-3).length, 1);
     const last7DaysTotal = recent7Days.reduce((sum, h) => sum + h.qty, 0);
     
-    // Calculate total historical demand (only non-zero days)
     const quantities = history.map(h => h.qty).filter(q => q > 0);
     const totalHistoricalDemand = quantities.reduce((sum, q) => sum + q, 0);
     const daysWithDemand = quantities.length;
     const avgDemandPerActiveDay = daysWithDemand > 0 ? totalHistoricalDemand / daysWithDemand : 0;
     
-    // Determine activity level: LOW = very few bookings, MEDIUM = some bookings, HIGH = regular activity
     const isLowActivity = totalScheduled <= 3 && last7DaysTotal <= 3 && daysWithDemand <= 5;
     const isVeryLowActivity = totalScheduled <= 2 && last7DaysTotal <= 2;
     
@@ -419,69 +369,53 @@ async function generateForecast(agentId, horizon = 7, historyDays = 60) {
     console.log(`Total scheduled: ${totalScheduled}, Last 7 days total: ${last7DaysTotal}, Days with demand: ${daysWithDemand}`);
     
     forecast = forecast.map((entry, index) => {
-      // Calculate forecast date (tomorrow + index days)
       const forecastDate = new Date(today);
       forecastDate.setDate(forecastDate.getDate() + index + 1);
       const dateKey = forecastDate.toISOString().split('T')[0];
       
-      // Get scheduled quantity for this date
       const scheduledQty = scheduledByDate[dateKey] || 0;
-      
-      // Get predicted additional demand from AI
       let p50 = entry.p50;
       
-      // Apply conservative caps based on activity level
       if (isVeryLowActivity) {
-        // Very low activity (2 or fewer bookings): predict minimal additional demand
-        // Maximum 1 cylinder additional per day, and only on days without scheduled deliveries
         if (scheduledQty > 0) {
-          p50 = 0; // No additional if already scheduled
+          p50 = 0;
         } else {
-          p50 = Math.min(p50, 1); // Max 1 additional
+          p50 = Math.min(p50, 1); 
         }
       } else if (isLowActivity) {
-        // Low activity (3 or fewer bookings): very conservative
         if (scheduledQty > 0) {
-          p50 = Math.min(p50, 1); // Max 1 additional if scheduled
+          p50 = Math.min(p50, 1); 
         } else {
-          p50 = Math.min(p50, 2); // Max 2 additional if no scheduled
+          p50 = Math.min(p50, 2); 
         }
       } else {
-        // Normal activity: use AI prediction but apply reasonable caps
         if (scheduledQty > 0) {
-          // Days with scheduled deliveries: minimal additional
           p50 = Math.min(p50, Math.max(1, Math.round(avgDemandPerActiveDay * 0.5)));
         } else {
-          // Days without scheduled: use recent pattern but cap at reasonable level
           if (todayQty > 0 || yesterdayQty > 0) {
             const recentAvg = Math.round((todayQty + yesterdayQty) / 2);
             p50 = Math.min(p50, Math.max(recentAvg, Math.round(last3DaysAvg)));
           }
-          // Cap at 2x average demand per active day to avoid unrealistic spikes
           p50 = Math.min(p50, Math.max(1, Math.round(avgDemandPerActiveDay * 2)));
         }
       }
       
-      // Ensure p50 is at least 0
       p50 = Math.max(0, Math.round(p50));
       
-      // Calculate p80 and p95 with conservative buffers
-      // For very low activity, keep buffers minimal
       const bufferMultiplier = isVeryLowActivity ? 1.0 : (isLowActivity ? 1.05 : 1.1);
       const p80 = Math.max(0, Math.round(p50 * bufferMultiplier));
       const p95 = Math.max(0, Math.round(p50 * (bufferMultiplier + 0.1)));
       
-      // Final forecast: predicted additional demand
+      
       return {
         date: dateKey,
-        p50: p50, // Additional demand prediction
-        p80: p80, // Additional demand at 80th percentile
-        p95: p95, // Additional demand at 95th percentile
-        scheduledQty: scheduledQty // Already scheduled (for reference)
+        p50: p50, 
+        p80: p80,
+        p95: p95, 
+        scheduledQty: scheduledQty 
       };
     });
     
-    // Ensure we have exactly the requested number of days
     if (forecast.length < horizon) {
       console.warn(`Forecast has ${forecast.length} days, expected ${horizon}. Padding with conservative values.`);
       const today = new Date();
@@ -493,10 +427,10 @@ async function generateForecast(agentId, horizon = 7, historyDays = 60) {
         const dateKey = nextDate.toISOString().split('T')[0];
         const scheduledQty = scheduledByDate[dateKey] || 0;
         
-        // Use conservative defaults for missing days
+    
         forecast.push({
           date: dateKey,
-          p50: scheduledQty > 0 ? 0 : 1, // Minimal additional if already scheduled
+          p50: scheduledQty > 0 ? 0 : 1,
           p80: scheduledQty > 0 ? 0 : 1,
           p95: scheduledQty > 0 ? 1 : 2,
           scheduledQty: scheduledQty
@@ -506,7 +440,6 @@ async function generateForecast(agentId, horizon = 7, historyDays = 60) {
       forecast = forecast.slice(0, horizon);
     }
     
-    // Remove scheduledQty from final output (it's internal, controllers will handle it differently)
     const finalForecast = forecast.map(({ scheduledQty, ...rest }) => rest);
     
     console.log(`Successfully generated forecast for agent ${agentId}: ${finalForecast.length} days`);
@@ -515,7 +448,6 @@ async function generateForecast(agentId, horizon = 7, historyDays = 60) {
   } catch (error) {
     console.error(`Error generating forecast for agent ${agentId}:`, error);
     
-    // Fallback to default forecast on error (use recent history if available)
     console.log('Falling back to default forecast...');
     const upcomingBookingsFallback = await getUpcomingBookings(agentId, horizon).catch(() => []);
     return generateDefaultForecast(horizon, history, upcomingBookingsFallback);
@@ -536,29 +468,23 @@ function generateDefaultForecast(horizon, recentHistory = [], upcomingBookings =
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   
-  // Create map of scheduled bookings
   const scheduledByDate = {};
   upcomingBookings.forEach(b => {
     scheduledByDate[b.date] = (scheduledByDate[b.date] || 0) + b.qty;
   });
   
-  // Try to get recent booking pattern
   const recent7Days = recentHistory.slice(-7);
   const todayQty = recent7Days.length > 0 ? recent7Days[recent7Days.length - 1].qty : 0;
   const yesterdayQty = recent7Days.length > 1 ? recent7Days[recent7Days.length - 2].qty : 0;
   const last3DaysAvg = recent7Days.slice(-3).reduce((sum, h) => sum + h.qty, 0) / Math.max(recent7Days.slice(-3).length, 1);
   
-  // Determine base additional demand (conservative approach)
-  // If we have recent activity, use it; otherwise be very conservative
+ 
   let baseAdditionalDemand;
   if (todayQty > 0 || yesterdayQty > 0) {
-    // Recent activity: predict similar additional demand
     baseAdditionalDemand = Math.max(1, Math.round((todayQty + yesterdayQty) / 2));
   } else if (last3DaysAvg > 0) {
-    // Some historical activity
     baseAdditionalDemand = Math.max(1, Math.round(last3DaysAvg));
   } else {
-    // No recent activity: very conservative (0-1 cylinders)
     baseAdditionalDemand = 1;
   }
   
@@ -568,19 +494,14 @@ function generateDefaultForecast(horizon, recentHistory = [], upcomingBookings =
     const dateKey = date.toISOString().split('T')[0];
     
     const scheduledQty = scheduledByDate[dateKey] || 0;
-    
-    // Predict additional demand (not including scheduled)
-    // If already have scheduled deliveries, predict minimal additional
+
     let p50;
     if (scheduledQty > 0) {
-      // Already scheduled: predict minimal additional (0-1)
       p50 = i === 1 ? Math.min(baseAdditionalDemand, 1) : 0;
     } else {
-      // No scheduled: use base demand pattern
       p50 = i === 1 ? baseAdditionalDemand : Math.max(0, Math.round(baseAdditionalDemand * 0.8));
     }
     
-    // Conservative buffers
     const p80 = Math.max(0, Math.round(p50 * 1.1));
     const p95 = Math.max(0, Math.round(p50 * 1.2));
     

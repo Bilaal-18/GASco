@@ -13,7 +13,6 @@ let razorpay = null;
 const getRazorpayInstance = () => {
   try {
     if (!razorpay) {
-      // Trim whitespace from environment variables to avoid issues
       const keyId = process.env.RAZORPAY_KEY_ID?.trim();
       const keySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
       
@@ -40,7 +39,6 @@ const getRazorpayInstance = () => {
 paymentCtrl.createRazorpayOrder = async (req, res) => {
 
   try {
-    // Check if Razorpay credentials are configured
     const keyId = process.env.RAZORPAY_KEY_ID?.trim();
     const keySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
     
@@ -100,10 +98,7 @@ paymentCtrl.createRazorpayOrder = async (req, res) => {
       return res.status(400).json({ error: 'Cylinder price not found' });
     }
 
-    // Calculate amount in paise (Razorpay requires amount in smallest currency unit)
     const amount = Math.round((cylinder.price * booking.quantity) * 100);
-    
-    // Razorpay minimum amount is 1 INR = 100 paise
     if (amount < 100) {
       return res.status(400).json({ error: 'Payment amount must be at least ₹1' });
     } 
@@ -139,7 +134,6 @@ paymentCtrl.createRazorpayOrder = async (req, res) => {
         currency: 'INR'
       });
       
-      // Provide more specific error messages
       let errorMessage = 'Failed to create payment order. Please try again.';
       if (razorpayError.error?.description) {
         errorMessage = razorpayError.error.description;
@@ -160,7 +154,7 @@ paymentCtrl.createRazorpayOrder = async (req, res) => {
       orderId: razorpayOrder.id,
       amount: razorpayOrder.amount,
       currency: razorpayOrder.currency,
-      keyId: keyId, // Use the trimmed keyId
+      keyId: keyId, 
     });
   } catch (err) {
     console.error('Error creating Razorpay order:', err);
@@ -171,7 +165,6 @@ paymentCtrl.createRazorpayOrder = async (req, res) => {
 //! -------------------- VERIFY RAZORPAY PAYMENT -------------------- //
 paymentCtrl.verifyPayment = async (req, res) => {
   try {
-    // Check if Razorpay secret key is configured
     const keySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
     
     if (!keySecret) {
@@ -188,10 +181,10 @@ paymentCtrl.verifyPayment = async (req, res) => {
       return res.status(400).json({ error: 'Missing payment details' });
     }
 
-    // Verify payment signature
+    
     const signatureString = `${razorpayOrderId}|${razorpayPaymentId}`;
     const generatedSignature = crypto
-      .createHmac('sha256', keySecret) // Use trimmed key secret
+      .createHmac('sha256', keySecret) 
       .update(signatureString)
       .digest('hex');
 
@@ -252,16 +245,12 @@ paymentCtrl.verifyPayment = async (req, res) => {
       paymentStatus: booking.paymentStatus
     });
 
-    // Check authorization - allow both customer and agent to verify payment
-    // Handle both populated and non-populated cases
     let bookingCustomerId;
     let bookingAgentId;
     
     if (booking.customer) {
-      // If populated, it's an object with _id
       bookingCustomerId = booking.customer._id || booking.customer;
     } else {
-      // If not populated, it should be in the booking document
       bookingCustomerId = booking.customer;
     }
     
@@ -273,7 +262,6 @@ paymentCtrl.verifyPayment = async (req, res) => {
     
     const userRole = req.role;
     
-    // Validate required fields and convert to ObjectId if needed
     if (!bookingCustomerId) {
       console.error('[Payment Verification] Booking customer ID is missing:', {
         bookingId: bookingId,
@@ -283,7 +271,6 @@ paymentCtrl.verifyPayment = async (req, res) => {
       return res.status(400).json({ error: 'Booking customer information is missing' });
     }
     
-    // Ensure bookingCustomerId is a valid ObjectId
     if (!mongoose.Types.ObjectId.isValid(bookingCustomerId)) {
       console.error('[Payment Verification] Invalid customer ID format:', {
         customerId: bookingCustomerId,
@@ -292,10 +279,8 @@ paymentCtrl.verifyPayment = async (req, res) => {
       return res.status(400).json({ error: 'Invalid customer ID format' });
     }
     
-    // Convert to ObjectId
     bookingCustomerId = new mongoose.Types.ObjectId(bookingCustomerId);
     
-    // Convert agent ID if it exists
     if (bookingAgentId) {
       if (!mongoose.Types.ObjectId.isValid(bookingAgentId)) {
         console.warn('[Payment Verification] Invalid agent ID format, skipping agent:', bookingAgentId);
@@ -314,7 +299,6 @@ paymentCtrl.verifyPayment = async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized: You are not authorized to verify this payment' });
     }
 
-    // Check if payment already exists for this booking (prevent duplicate payments)
     const existingPayment = await Payment.findOne({
       booking: bookingId,
       razorpayPaymentId: razorpayPaymentId
@@ -332,7 +316,6 @@ paymentCtrl.verifyPayment = async (req, res) => {
       });
     }
 
-    // Check if booking is already paid
     if (booking.paymentStatus === 'paid') {
       return res.status(400).json({ error: 'Booking is already paid' });
     }
@@ -349,7 +332,6 @@ paymentCtrl.verifyPayment = async (req, res) => {
 
     const amount = cylinder.price * booking.quantity;
     
-    // Validate amount
     if (!amount || amount <= 0 || isNaN(amount)) {
       console.error('[Payment Verification] Invalid amount:', {
         cylinderPrice: cylinder.price,
@@ -367,20 +349,17 @@ paymentCtrl.verifyPayment = async (req, res) => {
       method: 'online'
     });
 
-    // Ensure bookingId is a valid ObjectId
     if (!mongoose.Types.ObjectId.isValid(bookingId)) {
       console.error('[Payment Verification] Invalid booking ID format:', bookingId);
       return res.status(400).json({ error: 'Invalid booking ID format' });
     }
     const bookingObjectId = new mongoose.Types.ObjectId(bookingId);
     
-    // Create payment record
-    // Note: Payment model method enum only allows "cash" or "online", so use "online" for Razorpay
     const paymentData = {
       booking: bookingObjectId,
-      customer: bookingCustomerId, // Already converted to ObjectId
-      amount: Number(amount), // Ensure it's a number
-      method: 'online', // Use 'online' instead of 'razorpay' to match payment model enum
+      customer: bookingCustomerId, 
+      amount: Number(amount), 
+      method: 'online', 
       status: 'completed',
       razorpayOrderId: String(razorpayOrderId),
       razorpayPaymentId: String(razorpayPaymentId),
@@ -389,9 +368,8 @@ paymentCtrl.verifyPayment = async (req, res) => {
       paymentDate: new Date(),
     };
     
-    // Only add agent if it exists (agent is optional in payment model)
     if (bookingAgentId) {
-      paymentData.agent = bookingAgentId; // Already converted to ObjectId
+      paymentData.agent = bookingAgentId; 
     }
     
     console.log('[Payment Verification] Payment data to save:', {
@@ -417,7 +395,6 @@ paymentCtrl.verifyPayment = async (req, res) => {
         stack: saveError.stack
       });
       
-      // Return more specific error message
       if (saveError.name === 'ValidationError') {
         const validationErrors = Object.values(saveError.errors || {}).map(err => err.message).join(', ');
         return res.status(400).json({ 
@@ -426,23 +403,19 @@ paymentCtrl.verifyPayment = async (req, res) => {
         });
       }
       
-      // For other errors, return 500 with details
       return res.status(500).json({ 
-        error: 'Failed to save payment',
-        details: process.env.NODE_ENV === 'development' ? saveError.message : undefined,
-        errorName: process.env.NODE_ENV === 'development' ? saveError.name : undefined
+        error: 'Failed to save payment'
       });
     }
     
-    // Update booking payment status
+  
     try {
       booking.paymentStatus = 'paid';
       await booking.save();
       console.log('[Payment Verification] Booking payment status updated:', booking._id);
     } catch (saveError) {
       console.error('[Payment Verification] Error updating booking:', saveError);
-      // Payment is already saved, so we should still return success
-      // but log the error
+
     }
 
     try {
@@ -460,7 +433,6 @@ paymentCtrl.verifyPayment = async (req, res) => {
       });
     } catch (populateError) {
       console.error('[Payment Verification] Error populating payment:', populateError);
-      // Payment is saved, return the payment without population
       res.status(200).json({
         message: 'Payment verified and completed successfully',
         payment: payment,
@@ -540,7 +512,6 @@ paymentCtrl.getPaymentById = async (req, res) => {
       return res.status(404).json({ error: 'Payment not found' });
     }
 
-    // Check authorization
     if (userRole === 'customer') {
       const paymentCustomerId = payment.customer?._id || payment.customer;
       if (paymentCustomerId?.toString() !== userId?.toString()) {

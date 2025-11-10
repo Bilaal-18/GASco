@@ -1,21 +1,16 @@
 const mongoose = require('mongoose');
 
-/**
- * AgentForecast Model
- * Stores AI-generated demand forecasts for each agent
- * Forecasts include percentile predictions (p50, p80, p95) and suggested stock levels
- */
 const agentForecastSchema = new mongoose.Schema({
   agentId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'user',
     required: true,
-    index: true // Index for faster queries by agentId
+    index: true 
   },
   date: {
     type: Date,
     required: true,
-    index: true // Index for faster date queries
+    index: true 
   },
   p50: {
     type: Number,
@@ -44,21 +39,18 @@ const agentForecastSchema = new mongoose.Schema({
   createdAt: {
     type: Date,
     default: Date.now,
-    index: true // Index for tracking when forecast was generated
+    index: true 
   },
   lastUpdatedAt: {
     type: Date,
     default: Date.now,
-    index: true // Index for tracking when forecast was last updated
+    index: true 
   }
 }, {
-  timestamps: true // Adds createdAt and updatedAt automatically
+  timestamps: true 
 });
 
-// Compound index for efficient queries: agentId + date
 agentForecastSchema.index({ agentId: 1, date: 1 }, { unique: true });
-
-// Index for querying forecasts by date range
 agentForecastSchema.index({ date: 1, agentId: 1 });
 
 module.exports = mongoose.model('AgentForecast', agentForecastSchema, 'agent_forecasts');
