@@ -78,20 +78,27 @@ agentPaymentCtrl.createRazorpayOrder = async (req, res) => {
       console.error('Razorpay order creation error:', {
         error: razorpayError.message,
         errorDescription: razorpayError.error?.description,
+        errorCode: razorpayError.error?.code,
         statusCode: razorpayError.statusCode,
         agentId: agentId,
-        amount: orderAmount
+        amount: orderAmount,
+        amountInRupees: amount
       });
       
       let errorMessage = 'Failed to create payment order. Please try again.';
+      let errorCode = 'PAYMENT_ERROR';
+      
+      // Handle specific Razorpay errors
       if (razorpayError.error?.description) {
         errorMessage = razorpayError.error.description;
       } else if (razorpayError.statusCode === 401) {
         errorMessage = 'Payment gateway authentication failed. Please contact administrator.';
+        errorCode = 'AUTH_ERROR';
       }
       
       return res.status(500).json({ 
         error: errorMessage,
+        code: errorCode,
         details: process.env.NODE_ENV === 'development' ? razorpayError.message : undefined
       });
     }
@@ -324,7 +331,7 @@ agentPaymentCtrl.createCashPayment = async (req, res) => {
     const agentPayment = new AgentPayment({
       agent: agentId,                    
       admin: admin._id,                   
-      amount: paymentAmount,
+      amount: amount,
       method: 'cash',                   
       status: 'completed',
       paymentDate: new Date(),
