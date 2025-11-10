@@ -125,157 +125,81 @@ agentPaymentCtrl.createRazorpayOrder = async (req, res) => {
 
 agentPaymentCtrl.verifyPayment = async (req, res) => {
   try {
-    const { orderId, paymentId, signature, amount, description, notes } = req.body;
-    const agentId = req.UserId;   
-    const userRole = req.role;    
-    
-    if (userRole !== 'agent') {
-      return res.status(403).json({ error: 'Only agents can make payments to admin' });
+    const { orderId, paymentId, signature, amount, totalDue } = req.body;
+    const agentId = req.UserId;
+    const userRole = req.role;
+
+    if (userRole !== "agent") {
+      return res.status(403).json({ error: "Only agents can make payments to admin" });
     }
-    
+
     if (!orderId || !paymentId || !signature || !amount) {
-      return res.status(400).json({ error: 'Payment verification data is required (orderId, paymentId, signature, amount)' });
+      return res.status(400).json({ error: "Missing payment verification data" });
     }
-  
-    const admin = await User.findOne({ role: 'admin' });
-    if (!admin) {
-      return res.status(404).json({ error: 'Admin not found' });
-    }
-    
-    // Check if Razorpay secret key is configured
+
+    const admin = await User.findOne({ role: "admin" });
+    if (!admin) return res.status(404).json({ error: "Admin not found" });
+
+    // Verify Razorpay signature
+    const crypto = require("crypto");
     const keySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
-    
-    if (!keySecret) {
-      console.error('Razorpay key secret not configured');
-      return res.status(500).json({ 
-        error: 'Payment gateway not configured. Please contact administrator.' 
-      });
-    }
-    
-    const crypto = require('crypto');
-  
-    // Verify payment signature
-    const signatureString = `${orderId}|${paymentId}`;
+
     const generatedSignature = crypto
-      .createHmac('sha256', keySecret) // Use trimmed key secret
-      .update(signatureString)                   
-      .digest('hex');                                   
-    
-    console.log('[Agent Payment Verification] Signature verification:', {
-      orderId: orderId,
-      paymentId: paymentId,
-      signatureString: signatureString,
-      keySecretLength: keySecret.length,
-      generatedSignatureLength: generatedSignature.length,
-      receivedSignatureLength: signature.length,
-      signaturesMatch: generatedSignature === signature
-    });
-    
+      .createHmac("sha256", keySecret)
+      .update(orderId + "|" + paymentId)
+      .digest("hex");
+
     if (generatedSignature !== signature) {
-      console.error('[Agent Payment Verification] Invalid payment signature:', {
-        generated: generatedSignature.substring(0, 20) + '...',
-        received: signature.substring(0, 20) + '...',
-        orderId: orderId,
-        paymentId: paymentId,
-        signatureString: signatureString,
-        keySecretConfigured: !!keySecret,
-        keySecretLength: keySecret?.length || 0
-      });
-      return res.status(400).json({ 
-        error: 'Invalid payment signature. Please contact support if this issue persists.',
-        details: process.env.NODE_ENV === 'development' ? 'Signature mismatch' : undefined
-      });
+      return res.status(400).json({ error: "Invalid signature" });
     }
 
-    // Check if payment already exists for this order (prevent duplicate payments)
-    const existingPayment = await AgentPayment.findOne({
+    // ✅ NEW LOGIC: handle partial online payment
+    const onlinePaid = Number(amount);
+    // If totalDue is not provided, calculate from unpaid stocks
+    let totalAmountDue = Number(totalDue) || 0;
+    if (!totalDue || totalAmountDue === 0) {
+      const unpaidStocks = await AgentStock.find({ 
+        agentId: agentId,
+        paymentStatus: 'pending'
+      });
+      totalAmountDue = unpaidStocks.reduce((sum, stock) => sum + (stock.totalAmount || 0), 0);
+    }
+    const remainingCash = totalAmountDue - onlinePaid;
+
+    const paymentRecord = new AgentPayment({
+      agent: agentId,
+      admin: admin._id,
+      onlinePaid,
+      cashPaid: 0,
+      totalDue: totalAmountDue,
+      remainingCash: remainingCash > 0 ? remainingCash : 0,
+      amount: onlinePaid,
+      method: "online",
+      status: remainingCash > 0 ? "partial" : "completed",
       razorpayOrderId: orderId,
-      razorpayPaymentId: paymentId
+      razorpayPaymentId: paymentId,
+      razorpaySignature: signature,
+      transactionID: paymentId,
+      paymentDate: new Date(),
+      description: "Online payment to admin",
     });
 
-    if (existingPayment) {
-      console.warn('Duplicate payment attempt detected:', {
-        orderId,
-        paymentId,
-        existingPaymentId: existingPayment._id
-      });
-      return res.status(400).json({ 
-        error: 'Payment already processed for this order',
-        payment: existingPayment
-      });
-    }
+    await paymentRecord.save();
 
-    // Validate amount
-    const paymentAmount = parseFloat(amount);
-    if (!paymentAmount || paymentAmount <= 0) {
-      return res.status(400).json({ error: 'Invalid payment amount' });
-    }
-  
-    const unpaidStocks = await AgentStock.find({ 
-      agentId: agentId,              
-      paymentStatus: 'pending'        
-    }).sort({ assignedDate: 1 });    
-    
-    const stockIds = [];              
-    let remainingAmount = paymentAmount;    
-    
-    for (const stock of unpaidStocks) {
-      if (remainingAmount <= 0) break; 
-      
-      const stockAmount = parseFloat(stock.totalAmount || 0);
-      
-      if (remainingAmount >= stockAmount) {
-        stock.paymentStatus = 'paid';          
-        stockIds.push(stock._id);              
-        remainingAmount -= stockAmount;   
-        await stock.save();                     
-      } else {
-        // Partial payment - mark as paid if exact match (within 0.01 tolerance)
-        if (Math.abs(remainingAmount - stockAmount) < 0.01) {
-          stock.paymentStatus = 'paid';
-          stockIds.push(stock._id);
-          remainingAmount = 0;
-          await stock.save();
-        }
-      }
-    }
-  
-    const agentPayment = new AgentPayment({
-      agent: agentId,                    
-      admin: admin._id,                   
-      amount: paymentAmount,                     
-      method: 'online', // Use 'online' instead of 'razorpay' to match agent payment model enum
-      status: 'completed',                
-      razorpayOrderId: orderId,          
-      razorpayPaymentId: paymentId,       
-      razorpaySignature: signature,        
-      transactionID: paymentId,           
-      paymentDate: new Date(),         
-      description: description || 'Online payment to admin',
-      notes: notes,                       
-      stockIds: stockIds                  
-    });
-    
-    await agentPayment.save();
-    
-    const populatedPayment = await AgentPayment.findById(agentPayment._id)
-      .populate('agent', 'agentname username email phoneNo')
-      .populate('admin', 'username email');
-    
+    const populatedPayment = await AgentPayment.findById(paymentRecord._id)
+      .populate("agent", "agentname email phoneNo")
+      .populate("admin", "username email");
+
     res.status(200).json({
-      message: 'Payment verified and recorded successfully',
+      message: "Online payment recorded",
       payment: populatedPayment,
-      stockIds: stockIds
     });
   } catch (error) {
-    console.error('Payment verification error:', error);
-    console.error('Error stack:', error.stack);
-    res.status(500).json({ 
-      error: 'Failed to verify payment',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    console.error("verifyPayment error:", error);
+    res.status(500).json({ error: "Failed to verify payment" });
   }
 };
+
 
 //! <--------------------CASH PAYMENT--------------------> !\\
 
@@ -374,20 +298,104 @@ agentPaymentCtrl.getAgentPaymentHistory = async (req, res) => {
     const stocks = await AgentStock.find({ agentId })
       .populate('cylinderId', 'price cylinderName cylinderType'); 
     
-    const totalStockAmount = stocks.reduce((sum, s) => sum + (s.totalAmount || 0), 0);
+    // Calculate total stock amount from ALL stocks (both paid and unpaid)
+    const totalStockAmount = stocks.reduce((sum, s) => sum + (Number(s.totalAmount || 0)), 0);
     
-    const unpaidStockAmount = stocks
-      .filter(s => s.paymentStatus === 'pending') 
-      .reduce((sum, s) => sum + (s.totalAmount || 0), 0);
+    // Calculate total paid from payments (including partial payments)
+    // For partial/paid/completed payments: use the maximum of (onlinePaid + cashPaid) or amount
+    // This handles both new payments (with onlinePaid/cashPaid) and old payments (with only amount)
+    // For pending/failed payments: don't count them as paid yet
+    console.log(`[DEBUG] Processing ${payments.length} payments for agent ${agentId}`);
     
-    const paidStockAmount = stocks
-      .filter(s => s.paymentStatus === 'paid')   
-      .reduce((sum, s) => sum + (s.totalAmount || 0), 0);
+    const totalPaidFromPayments = payments.reduce((sum, p) => {
+      // Get raw values - handle both Mongoose documents and plain objects
+      const rawOnlinePaid = p.onlinePaid !== undefined ? p.onlinePaid : (p.get ? p.get('onlinePaid') : undefined);
+      const rawCashPaid = p.cashPaid !== undefined ? p.cashPaid : (p.get ? p.get('cashPaid') : undefined);
+      const rawAmount = p.amount !== undefined ? p.amount : (p.get ? p.get('amount') : undefined);
+      const rawStatus = p.status !== undefined ? p.status : (p.get ? p.get('status') : undefined);
+      
+      const onlinePaid = Number(rawOnlinePaid || 0);
+      const cashPaid = Number(rawCashPaid || 0);
+      const amount = Number(rawAmount || 0);
+      const status = String(rawStatus || 'unknown');
+      
+      // Skip pending or failed payments
+      if (status === 'pending' || status === 'failed') {
+        console.log(`[Payment ${p._id}] Skipped - status: ${status}`);
+        return sum;
+      }
+      
+      // Calculate payment amount: use the maximum of (onlinePaid + cashPaid) or amount
+      // This ensures we always get the correct value regardless of which fields are set
+      const partialTotal = onlinePaid + cashPaid;
+      const paymentAmount = Math.max(partialTotal, amount);
+      
+      console.log(`[Payment ${p._id}] status=${status}, onlinePaid=${onlinePaid}, cashPaid=${cashPaid}, amount=${amount}, partialTotal=${partialTotal}, calculated=${paymentAmount}`);
+      
+      return sum + paymentAmount;
+    }, 0);
+    
+    console.log(`[DEBUG] Total paid from payments: ${totalPaidFromPayments}`);
+    
+    // Calculate unpaid amount: total stock - total paid
+    // This accounts for partial payments where stocks might still be marked as 'pending'
+    // but some payment has been made
+    const unpaidStockAmount = Math.max(0, totalStockAmount - totalPaidFromPayments);
+    
+    // Get unpaid stocks list (for display purposes)
+    const unpaidStocks = stocks.filter(s => s.paymentStatus === 'pending');
+    
+    // Paid amount is the total paid from payments
+    const paidStockAmount = totalPaidFromPayments;
+    
+    // Debug logging to help diagnose issues
+    console.log('Agent Payment History Calculation:', {
+      agentId: agentId.toString(),
+      totalStockAmount,
+      unpaidStockAmount,
+      totalPaidFromPayments,
+      paidStockAmount,
+      stocksCount: stocks.length,
+      unpaidStocksCount: unpaidStocks.length,
+      paymentsCount: payments.length,
+      allPaymentsStatus: payments.map(p => ({ id: p._id.toString(), status: p.status, amount: p.amount, onlinePaid: p.onlinePaid, cashPaid: p.cashPaid })),
+      stocksBreakdown: stocks.map(s => ({ 
+        id: s._id, 
+        amount: s.totalAmount, 
+        status: s.paymentStatus,
+        isUnpaid: s.paymentStatus === 'pending'
+      })),
+      paymentsBreakdown: payments.map(p => {
+        const onlinePaid = Number(p.onlinePaid || 0);
+        const cashPaid = Number(p.cashPaid || 0);
+        const amount = Number(p.amount || 0);
+        let calculatedPaid = 0;
+        
+        if (p.status === 'pending' || p.status === 'failed') {
+          calculatedPaid = 0;
+        } else {
+          const partialTotal = onlinePaid + cashPaid;
+          calculatedPaid = Math.max(partialTotal, amount);
+        }
+        
+        return {
+          id: p._id,
+          status: p.status,
+          method: p.method,
+          onlinePaid: p.onlinePaid,
+          cashPaid: p.cashPaid,
+          amount: p.amount,
+          totalDue: p.totalDue,
+          calculatedPaid: calculatedPaid,
+          partialTotal: onlinePaid + cashPaid
+        };
+      })
+    });
   
     res.status(200).json({
       payments: payments,                                    
       totalPayments: payments.length,                       
-      totalAmount: payments.reduce((sum, p) => sum + (p.amount || 0), 0), 
+      totalAmount: totalPaidFromPayments, // Total amount paid (online + cash)
       stockInfo: {
         totalStockAmount: totalStockAmount,                  
         unpaidStockAmount: unpaidStockAmount,               
@@ -419,11 +427,35 @@ agentPaymentCtrl.getAllAgentPayments = async (req, res) => {
       .populate('stockIds')                                   
       .sort({ createdAt: -1 });                               
   
+    // Calculate total amount received (including partial payments)
+    // For partial/paid/completed payments: prefer onlinePaid + cashPaid if available, otherwise use amount
+    // For pending/failed payments: don't count them
+    const totalAmountReceived = payments.reduce((sum, p) => {
+      // Skip pending or failed payments
+      if (p.status === 'pending' || p.status === 'failed') {
+        return sum;
+      }
+      
+      // For partial, paid, or completed payments, try to use onlinePaid + cashPaid first
+      const onlinePaid = Number(p.onlinePaid || 0);
+      const cashPaid = Number(p.cashPaid || 0);
+      const hasPartialFields = onlinePaid > 0 || cashPaid > 0;
+      
+      if (hasPartialFields) {
+        // If onlinePaid or cashPaid exists, use their sum
+        return sum + onlinePaid + cashPaid;
+      } else {
+        // Otherwise, use the amount field
+        return sum + (Number(p.amount || 0));
+      }
+    }, 0);
+
     const summary = {
       total: payments.length, 
-      completed: payments.filter(p => p.status === 'completed').length,  
-      pending: payments.filter(p => p.status === 'pending').length,      
-      totalAmount: payments.reduce((sum, p) => sum + (p.amount || 0), 0), 
+      completed: payments.filter(p => p.status === 'completed' || p.status === 'paid').length,  
+      pending: payments.filter(p => p.status === 'pending').length,
+      partial: payments.filter(p => p.status === 'partial').length,
+      totalAmount: totalAmountReceived, 
       pendingAmount: payments
         .filter(p => p.status === 'pending')  
         .reduce((sum, p) => sum + (p.amount || 0), 0),
@@ -498,6 +530,181 @@ agentPaymentCtrl.getAgentPaymentStats = async (req, res) => {
     console.error('Error fetching agent payment stats:', error);
     res.status(500).json({ 
       error: 'Failed to fetch agent payment statistics',
+      details: error.message 
+    });
+  }
+};
+
+//! <--------------------CREATE CASH PAYMENT BY ADMIN--------------------> !\\
+
+agentPaymentCtrl.createCashPaymentByAdmin = async (req, res) => {
+  try {
+    const { agentId, amount, description, notes } = req.body;
+    const userRole = req.role;
+    const adminId = req.UserId;
+
+    if (userRole !== 'admin') {
+      return res.status(403).json({ error: 'Only admin can create cash payments for agents' });
+    }
+
+    if (!agentId || !amount || amount <= 0) {
+      return res.status(400).json({ error: 'Valid agent ID and amount are required' });
+    }
+
+    // Find the agent
+    const agent = await User.findById(agentId);
+    if (!agent || agent.role !== 'agent') {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+
+    // Get unpaid stocks for this agent
+    const unpaidStocks = await AgentStock.find({ 
+      agentId: agentId,
+      paymentStatus: 'pending'
+    }).sort({ assignedDate: 1 });
+
+    const stockIds = [];
+    let remainingAmount = Number(amount);
+    const totalStockAmount = unpaidStocks.reduce((sum, stock) => sum + (stock.totalAmount || 0), 0);
+
+    // Mark stocks as paid based on payment amount
+    for (const stock of unpaidStocks) {
+      if (remainingAmount <= 0) break; 
+      
+      const stockAmount = parseFloat(stock.totalAmount || 0);
+      
+      if (remainingAmount >= stockAmount) {
+        stock.paymentStatus = 'paid';          
+        stockIds.push(stock._id);              
+        remainingAmount -= stockAmount;   
+        await stock.save();                     
+      } else {
+        // Partial payment - mark as paid if exact match (within 0.01 tolerance)
+        if (Math.abs(remainingAmount - stockAmount) < 0.01) {
+          stock.paymentStatus = 'paid';
+          stockIds.push(stock._id);
+          remainingAmount = 0;
+          await stock.save();
+        }
+      }
+    }
+
+    // Determine status based on whether all stocks are paid
+    const paymentStatus = remainingAmount >= 0 && stockIds.length === unpaidStocks.length ? 'completed' : 'completed';
+    const totalDue = totalStockAmount;
+    const remainingCash = Math.max(0, totalDue - amount);
+
+    const agentPayment = new AgentPayment({
+      agent: agentId,                    
+      admin: adminId,                   
+      amount: Number(amount),
+      cashPaid: Number(amount),
+      onlinePaid: 0,
+      totalDue: totalDue,
+      remainingCash: remainingCash,
+      method: 'cash',                   
+      status: paymentStatus,
+      paymentDate: new Date(),
+      description: description || 'Cash payment recorded by admin',
+      notes: notes,
+      transactionID: `CASH_ADMIN_${agentId}_${Date.now()}`, 
+      stockIds: stockIds
+    });
+    
+    await agentPayment.save();
+
+    const populatedPayment = await AgentPayment.findById(agentPayment._id)
+      .populate("agent", "agentname email phoneNo")
+      .populate("admin", "username email");
+
+    res.status(200).json({
+      message: 'Cash payment recorded successfully',
+      payment: populatedPayment
+    });
+  } catch (error) {
+    console.error('Admin cash payment error:', error);
+    res.status(500).json({ 
+      error: 'Failed to record cash payment',
+      details: error.message 
+    });
+  }
+};
+
+//! <--------------------UPDATE CASH PAID BY ADMIN--------------------> !\\
+
+agentPaymentCtrl.updateCashPaid = async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+    const { cashPaid } = req.body;
+    const userRole = req.role;
+
+    if (userRole !== 'admin') {
+      return res.status(403).json({ error: 'Only admin can update cash paid amount' });
+    }
+
+    if (!cashPaid || cashPaid < 0) {
+      return res.status(400).json({ error: 'Valid cash paid amount is required' });
+    }
+
+    // Find the payment record
+    const payment = await AgentPayment.findById(paymentId);
+    if (!payment) {
+      return res.status(404).json({ error: 'Payment record not found' });
+    }
+
+    // Check if this is a partial payment (online payment with remaining cash)
+    if (payment.status !== 'partial' && payment.method !== 'online') {
+      return res.status(400).json({ error: 'Can only update cash paid for partial online payments' });
+    }
+
+    const totalCashPaid = Number(cashPaid);
+    const onlinePaid = Number(payment.onlinePaid || 0);
+    const totalDue = Number(payment.totalDue || 0);
+    const totalPaid = onlinePaid + totalCashPaid;
+
+    // Validate that cash paid doesn't exceed remaining amount
+    const remainingCash = totalDue - onlinePaid;
+    if (totalCashPaid > remainingCash) {
+      return res.status(400).json({ 
+        error: `Cash paid (₹${totalCashPaid}) cannot exceed remaining amount (₹${remainingCash})` 
+      });
+    }
+
+    // Update payment record
+    payment.cashPaid = totalCashPaid;
+    payment.remainingCash = remainingCash - totalCashPaid;
+    
+    // Update status based on whether payment is complete
+    if (totalPaid >= totalDue) {
+      payment.status = 'paid';
+      payment.amount = totalPaid; // Update total amount
+    } else {
+      payment.status = 'partial';
+      payment.amount = onlinePaid; // Keep amount as online paid for now
+    }
+
+    await payment.save();
+
+    // Update stock payment status if payment is complete
+    if (payment.status === 'paid' && payment.stockIds && payment.stockIds.length > 0) {
+      await AgentStock.updateMany(
+        { _id: { $in: payment.stockIds } },
+        { paymentStatus: 'paid' }
+      );
+    }
+
+    const populatedPayment = await AgentPayment.findById(payment._id)
+      .populate('agent', 'agentname email phoneNo')
+      .populate('admin', 'username email');
+
+    res.status(200).json({
+      message: 'Cash paid amount updated successfully',
+      payment: populatedPayment,
+    });
+  } catch (error) {
+    console.error('Error updating cash paid amount:', error);
+    res.status(500).json({ 
+      error: 'Failed to update cash paid amount',
       details: error.message 
     });
   }

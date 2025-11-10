@@ -70,10 +70,11 @@ app.delete("/api/deleteInventary/:id",authenticateUser,authorizeUser("admin"),in
 //! <--------------------AGENT INVENTARY CONTROLLERS--------------------> !\\
 
 app.post("/api/addStock",authenticateUser,authorizeUser("admin"),agentStockCtrl.addStock);
-app.get("/api/ownStock/:id",authenticateUser,authorizeUser("agent"),agentStockCtrl.OwnStock);
+app.get("/api/ownStock/:id",authenticateUser,authorizeUser(["agent","admin"]),agentStockCtrl.OwnStock);
+app.get("/api/customer/agent-cylinders",authenticateUser,authorizeUser("customer"),agentStockCtrl.getCustomerAgentCylinders);
 app.get("/api/ListAll",authenticateUser,authorizeUser("admin"),agentStockCtrl.ListAll);
 app.put("/api/updateStock/:agentId",authenticateUser,authorizeUser(["admin","agent"]),agentStockCtrl.updateStock);
-app.delete("/api/DeleteStock/:agentId/:cylinderId",authenticateUser,authorizeUser("admin"),agentStockCtrl.deleteStock);
+app.delete("/api/DeleteStock/:agentId/:cylinderId",authenticateUser,authorizeUser(["admin","agent"]),agentStockCtrl.deleteStock);
 app.get("/api/getSummary/:id",authenticateUser,authorizeUser("agent"),agentStockCtrl.getAgentSummary);
 app.get("/api/report/:id",authenticateUser,authorizeUser("agent"),agentStockCtrl.generateReport);
 app.get("/api/getStats",authenticateUser,authorizeUser("agent"),agentStockCtrl.getStats);
@@ -112,6 +113,8 @@ app.post("/api/agent/payment/verify",authenticateUser,authorizeUser("agent"),age
 app.post("/api/agent/payment/cash",authenticateUser,authorizeUser("agent"),agentPaymentCtrl.createCashPayment);
 app.get("/api/agent/payment/history",authenticateUser,authorizeUser("agent"),agentPaymentCtrl.getAgentPaymentHistory);
 app.get("/api/admin/agent-payments",authenticateUser,authorizeUser("admin"),agentPaymentCtrl.getAllAgentPayments);
+app.post("/api/admin/agent-payments/cash",authenticateUser,authorizeUser("admin"),agentPaymentCtrl.createCashPaymentByAdmin);
+app.put("/api/admin/agent-payments/:paymentId/cash-paid",authenticateUser,authorizeUser("admin"),agentPaymentCtrl.updateCashPaid);
 
 //! <--------------------UPLOAD CONTROLLERS--------------------> !\\
 

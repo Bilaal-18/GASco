@@ -163,6 +163,18 @@ agentStockCtrl.updateStock = async (req, res) => {
 agentStockCtrl.deleteStock = async (req, res) => {
   try {
     const { agentId, cylinderId } = req.params;
+    const userRole = req.role;
+    const authenticatedUserId = req.UserId;
+
+    // Check authorization: admin can delete any stock, agent can only delete their own stock
+    if (userRole === 'agent') {
+      // Agent can only delete their own stock
+      if (authenticatedUserId.toString() !== agentId.toString()) {
+        return res.status(403).json({ error: "You can only delete your own stock" });
+      }
+    } else if (userRole !== 'admin') {
+      return res.status(403).json({ error: "Only admin and agents can delete stock" });
+    }
 
     const stock = await agentStock.findOneAndDelete({ agentId, cylinderId });
     if (!stock) {
@@ -299,6 +311,57 @@ agentStockCtrl.getStats = async (req, res) => {
   } catch (err) {
     console.error("Error in getStats:", err);
     res.status(500).json({ error: "Failed to load dashboard data" });
+  }
+};
+
+//! <--------------------GET CUSTOMER AGENT AVAILABLE CYLINDERS--------------------> !\\
+
+agentStockCtrl.getCustomerAgentCylinders = async (req, res) => {
+  try {
+    const customerId = req.UserId;
+    const userRole = req.role;
+
+    if (userRole !== 'customer') {
+      return res.status(403).json({ error: 'Only customers can access this endpoint' });
+    }
+
+    // Get customer's assigned agent
+    const User = require('../models/user-model');
+    const customer = await User.findById(customerId);
+    
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    if (!customer.agent) {
+      return res.status(400).json({ 
+        error: 'No agent assigned. Please contact admin to assign an agent.' 
+      });
+    }
+
+    // Get agent stock with quantity > 0
+    const agentStocks = await agentStock.find({ 
+      agentId: customer.agent,
+      quantity: { $gt: 0 } // Only stocks with quantity > 0
+    }).populate('cylinderId', 'cylinderName cylinderType weight price');
+
+    // Format as cylinders with available quantities
+    const cylinders = agentStocks.map(stock => ({
+      _id: stock.cylinderId._id,
+      cylinderName: stock.cylinderId.cylinderName,
+      cylinderType: stock.cylinderId.cylinderType,
+      weight: stock.cylinderId.weight,
+      price: stock.cylinderId.price,
+      totalQuantity: stock.quantity, // Available quantity in agent's stock
+    }));
+
+    res.status(200).json({
+      message: 'Available cylinders fetched successfully',
+      cylinders: cylinders
+    });
+  } catch (err) {
+    console.error('Error fetching customer agent cylinders:', err);
+    res.status(500).json({ error: 'Failed to fetch available cylinders' });
   }
 };
 
