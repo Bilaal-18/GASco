@@ -1,5 +1,5 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { exportCustomerHistory } = require('../ml/exportCustomerHistory');
+const { exportCustomerHistory } = require('../history/exportCustomerHistory');
 
 let genAI;
 try {
@@ -12,27 +12,15 @@ try {
   console.error('Error initializing Gemini AI:', error.message);
 }
 
-/**
- * Generate forecast for a customer using Gemini AI
- * 
- * @param {string} customerId - MongoDB ObjectId of the customer
- * @param {string} agentId - MongoDB ObjectId of the agent (for context)
- * @param {number} horizon - Number of days to forecast (default: 7)
- * @param {number} historyDays - Number of days of history to use (default: 60)
- * @returns {Promise<Array>} Forecast array: [{ date: "YYYY-MM-DD", p50, p80, p95 }, ...]
- */
 async function generateCustomerForecast(customerId, agentId, horizon = 7, historyDays = 60) {
   let history = []; 
   try {
     if (!genAI) {
       throw new Error('Gemini AI is not initialized. Check GEMINI_API_KEY environment variable.');
     }
-
-    console.log(`Generating forecast for customer ${customerId} with ${horizon} day horizon...`);
     history = await exportCustomerHistory(customerId, historyDays);
     
     if (!history || history.length === 0) {
-      console.warn(`No history found for customer ${customerId}. Generating default forecast.`);
       return generateDefaultForecast(horizon, []);
     }
     const prompt = buildCustomerForecastPrompt(history, horizon);
@@ -41,9 +29,6 @@ async function generateCustomerForecast(customerId, agentId, horizon = 7, histor
     const fallbackModels = ['gemini-2.0-flash-exp', 'gemini-1.5-flash', 'gemini-1.5-pro'];
     const modelNames = [preferredModel, ...fallbackModels.filter(m => m !== preferredModel)];
     
-    console.log(`[Gemini] Using preferred model: ${preferredModel} (from ${process.env.GEMINI_MODEL ? 'GEMINI_MODEL env' : 'default'})`);
-    console.log(`[Gemini] Fallback models: ${fallbackModels.filter(m => m !== preferredModel).join(', ')}`);
-    
     let result;
     let response;
     let responseText;
@@ -51,7 +36,6 @@ async function generateCustomerForecast(customerId, agentId, horizon = 7, histor
     
     for (const modelName of modelNames) {
       try {
-        console.log(`Trying Gemini model: ${modelName} for customer ${customerId}...`);
         const model = genAI.getGenerativeModel({ model: modelName });
         result = await model.generateContent(prompt);
         response = await result.response;
@@ -64,8 +48,7 @@ async function generateCustomerForecast(customerId, agentId, horizon = 7, histor
         
         
         if (errorMessage.includes('429') || errorMessage.includes('Too Many Requests') || errorMessage.includes('quota')) {
-          console.warn(`Model ${modelName} rate limited. Waiting before trying next model...`);
-          
+ 
           let retryDelay = 60000; 
           try {
             const retryMatch = errorMessage.match(/retry in (\d+\.?\d*)s/i);
@@ -75,14 +58,9 @@ async function generateCustomerForecast(customerId, agentId, horizon = 7, histor
           } catch (e) {
           
           }
-          
-          console.log(`Waiting ${Math.ceil(retryDelay / 1000)} seconds before trying next model...`);
           await new Promise(resolve => setTimeout(resolve, retryDelay));
-          
           continue;
         }
-        
-        console.warn(`Model ${modelName} failed:`, error.message);
         continue;
       }
     }
@@ -122,7 +100,6 @@ async function generateCustomerForecast(customerId, agentId, horizon = 7, histor
     });
     
     if (forecast.length < horizon) {
-      console.warn(`Forecast has ${forecast.length} days, expected ${horizon}. Padding with last value.`);
       const lastEntry = forecast[forecast.length - 1] || { p50: 0, p80: 0, p95: 0 };
       while (forecast.length < horizon) {
         const nextDate = new Date(forecast[forecast.length - 1].date);
@@ -137,27 +114,21 @@ async function generateCustomerForecast(customerId, agentId, horizon = 7, histor
     } else if (forecast.length > horizon) {
       forecast = forecast.slice(0, horizon);
     }
-    
-    console.log(`Successfully generated forecast for customer ${customerId}: ${forecast.length} days`);
     return forecast;
   } catch (error) {
-    console.error(`Error generating forecast for customer ${customerId}:`, error);
-    
-    console.log('Falling back to default forecast...');
+    console.error('Error generating forecast for customer ', error);
     return generateDefaultForecast(horizon, history);
   }
 }
 
 
 function buildCustomerForecastPrompt(history, horizon = 7) {
-  // Get recent booking patterns (last 7 days) - this is critical for tomorrow's prediction
   const recent7Days = history.slice(-7);
   const todayQty = recent7Days.length > 0 ? recent7Days[recent7Days.length - 1].qty : 0;
   const yesterdayQty = recent7Days.length > 1 ? recent7Days[recent7Days.length - 2].qty : 0;
   const last3DaysAvg = recent7Days.slice(-3).reduce((sum, h) => sum + h.qty, 0) / Math.max(recent7Days.slice(-3).length, 1);
   const last7DaysAvg = recent7Days.reduce((sum, h) => sum + h.qty, 0) / Math.max(recent7Days.length, 1);
-  
-  // Calculate basic statistics from history
+
   const quantities = history.map(h => h.qty).filter(q => q > 0);
   const avgDemand = quantities.length > 0 
     ? quantities.reduce((sum, q) => sum + q, 0) / quantities.length 

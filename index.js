@@ -134,11 +134,7 @@ app.post("/api/translate/detect",authenticateUser,translationCtrl.detectManglish
 
 //! <--------------------FORECAST ROUTES--------------------> !\\
   app.get("/api/agents/:agentId/forecast/stats", authenticateUser, authorizeUser(["admin","agent"]), forecastCtrl.getAgentForecastStats);
-
-  
-  app.get("/api/agents/:agentId/customers/forecasts", authenticateUser, authorizeUser(["admin","agent"]), customerForecastCtrl.getAgentCustomersForecasts);
-
-  
+  app.get("/api/agents/:agentId/customers/forecasts", authenticateUser, authorizeUser(["admin","agent"]), customerForecastCtrl.getAgentCustomersForecasts);  
   app.get("/api/agents/:agentId/forecast", authenticateUser, authorizeUser(["admin","agent"]), forecastCtrl.getAgentForecast);
 
 

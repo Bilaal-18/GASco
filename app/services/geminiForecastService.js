@@ -1,5 +1,5 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { exportAgentHistory } = require('../ml/exportAgentHistory');
+const { exportAgentHistory } = require('../history/exportAgentHistory');
 const Booking = require('../models/booking-model');
 const mongoose = require('mongoose');
 
@@ -15,13 +15,7 @@ try {
   console.error('Error initializing Gemini AI:', error.message);
 }
 
-/**
- * Get upcoming scheduled bookings for an agent
- * 
- * @param {string} agentId - MongoDB ObjectId of the agent
- * @param {number} horizon - Number of days to look ahead
- * @returns {Promise<Array>} Array of { date: "YYYY-MM-DD", qty: number } for upcoming bookings
- */
+
 async function getUpcomingBookings(agentId, horizon = 7) {
   try {
     const today = new Date();
@@ -86,14 +80,6 @@ async function getUpcomingBookings(agentId, horizon = 7) {
   }
 }
 
-/**
- * Build a structured prompt for Gemini AI based on agent history
- * 
- * @param {Array} history - Array of { date: "YYYY-MM-DD", qty: number }
- * @param {Array} upcomingBookings - Array of { date: "YYYY-MM-DD", qty: number } for scheduled deliveries
- * @param {number} horizon - Number of days to forecast (default: 7)
- * @returns {string} Formatted prompt for Gemini
- */
 function buildForecastPrompt(history, upcomingBookings = [], horizon = 7) {
   const recent7Days = history.slice(-7);
   const todayQty = recent7Days.length > 0 ? recent7Days[recent7Days.length - 1].qty : 0;
@@ -200,12 +186,6 @@ Generate the forecast now (remember: p50/p80/p95 should NOT include already sche
   return prompt;
 }
 
-/**
- * Parse Gemini AI response and extract forecast JSON
- * 
- * @param {string} responseText - Raw response from Gemini
- * @returns {Array} Parsed forecast array
- */
 function parseGeminiResponse(responseText) {
   try {
 
@@ -255,33 +235,20 @@ function parseGeminiResponse(responseText) {
   }
 }
 
-/**
- * Generate forecast using Gemini AI
- * 
- * @param {string} agentId - MongoDB ObjectId of the agent
- * @param {number} horizon - Number of days to forecast (default: 7)
- * @param {number} historyDays - Number of days of history to use (default: 60)
- * @returns {Promise<Array>} Forecast array: [{ date: "YYYY-MM-DD", p50, p80, p95 }, ...]
- */
 async function generateForecast(agentId, horizon = 7, historyDays = 60) {
   let history = []; 
   try {
     if (!genAI) {
       throw new Error('Gemini AI is not initialized. Check GEMINI_API_KEY environment variable.');
     }
-
-    console.log(`Generating forecast for agent ${agentId} with ${horizon} day horizon...`);
     history = await exportAgentHistory(agentId, historyDays);
     const upcomingBookings = await getUpcomingBookings(agentId, horizon);
     
-    console.log(`Found ${upcomingBookings.length} upcoming scheduled bookings for agent ${agentId}`);
     if (upcomingBookings.length > 0) {
       const totalScheduled = upcomingBookings.reduce((sum, b) => sum + b.qty, 0);
-      console.log(`Total scheduled: ${totalScheduled} cylinders in next ${horizon} days`);
     }
     
     if (!history || history.length === 0) {
-      console.warn(`No history found for agent ${agentId}. Generating default forecast.`);
       return generateDefaultForecast(horizon, [], upcomingBookings);
     }
 
@@ -291,9 +258,6 @@ async function generateForecast(agentId, horizon = 7, historyDays = 60) {
     const preferredModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
     const fallbackModels = ['gemini-2.0-flash-exp', 'gemini-1.5-flash', 'gemini-1.5-pro'];
     const modelNames = [preferredModel, ...fallbackModels.filter(m => m !== preferredModel)];
-    
-    console.log(`[Gemini] Using preferred model: ${preferredModel} (from ${process.env.GEMINI_MODEL ? 'GEMINI_MODEL env' : 'default'})`);
-    console.log(`[Gemini] Fallback models: ${fallbackModels.filter(m => m !== preferredModel).join(', ')}`);
     
     let result;
     let response;
@@ -314,8 +278,7 @@ async function generateForecast(agentId, horizon = 7, historyDays = 60) {
         const errorMessage = error.message || '';
         
         if (errorMessage.includes('429') || errorMessage.includes('Too Many Requests') || errorMessage.includes('quota')) {
-          console.warn(`Model ${modelName} rate limited. Waiting before trying next model...`);
-        
+          
           let retryDelay = 60000;
           try {
             const retryMatch = errorMessage.match(/retry in (\d+\.?\d*)s/i);
@@ -325,13 +288,10 @@ async function generateForecast(agentId, horizon = 7, historyDays = 60) {
           } catch (e) {
           }
           
-          console.log(`Waiting ${Math.ceil(retryDelay / 1000)} seconds before trying next model...`);
           await new Promise(resolve => setTimeout(resolve, retryDelay));
-          
           continue;
         }
         
-        console.warn(`Model ${modelName} failed:`, error.message);
         continue;
       }
     }
@@ -364,9 +324,6 @@ async function generateForecast(agentId, horizon = 7, historyDays = 60) {
     
     const isLowActivity = totalScheduled <= 3 && last7DaysTotal <= 3 && daysWithDemand <= 5;
     const isVeryLowActivity = totalScheduled <= 2 && last7DaysTotal <= 2;
-    
-    console.log(`Activity level: ${isVeryLowActivity ? 'VERY LOW' : isLowActivity ? 'LOW' : 'NORMAL'}`);
-    console.log(`Total scheduled: ${totalScheduled}, Last 7 days total: ${last7DaysTotal}, Days with demand: ${daysWithDemand}`);
     
     forecast = forecast.map((entry, index) => {
       const forecastDate = new Date(today);
@@ -442,27 +399,14 @@ async function generateForecast(agentId, horizon = 7, historyDays = 60) {
     
     const finalForecast = forecast.map(({ scheduledQty, ...rest }) => rest);
     
-    console.log(`Successfully generated forecast for agent ${agentId}: ${finalForecast.length} days`);
-    console.log(`Forecast summary: Avg p50 = ${(finalForecast.reduce((sum, f) => sum + f.p50, 0) / finalForecast.length).toFixed(1)} cylinders/day`);
     return finalForecast;
   } catch (error) {
-    console.error(`Error generating forecast for agent ${agentId}:`, error);
-    
-    console.log('Falling back to default forecast...');
+    console.log('Error generating forecast...',error);
     const upcomingBookingsFallback = await getUpcomingBookings(agentId, horizon).catch(() => []);
     return generateDefaultForecast(horizon, history, upcomingBookingsFallback);
   }
 }
 
-/**
- * Generate a default forecast when history is unavailable or AI fails
- * Uses recent booking patterns if available, accounts for scheduled bookings
- * 
- * @param {number} horizon - Number of days to forecast
- * @param {Array} recentHistory - Recent booking history to use for pattern matching
- * @param {Array} upcomingBookings - Upcoming scheduled bookings
- * @returns {Array} Default forecast array
- */
 function generateDefaultForecast(horizon, recentHistory = [], upcomingBookings = []) {
   const forecast = [];
   const today = new Date();

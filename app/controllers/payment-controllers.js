@@ -466,19 +466,19 @@ paymentCtrl.getPaymentHistory = async (req, res) => {
 
     if (userRole === 'customer') {
       payments = await Payment.find({ customer: userId })
-        .populate('booking')
+        .populate({ path: 'booking', populate: { path: 'cylinder', select: 'cylinderType cylinderName weight price' } })
         .populate('customer')
         .populate('agent')
         .sort({ createdAt: -1 });
     } else if (userRole === 'agent') {
       payments = await Payment.find({ agent: userId })
-        .populate('booking')
+        .populate({ path: 'booking', populate: { path: 'cylinder', select: 'cylinderType cylinderName weight price' } })
         .populate('customer')
         .populate('agent')
         .sort({ createdAt: -1 });
     } else if (userRole === 'admin') {
       payments = await Payment.find()
-        .populate('booking')
+        .populate({ path: 'booking', populate: { path: 'cylinder', select: 'cylinderType cylinderName weight price' } })
         .populate('customer')
         .populate('agent')
         .sort({ createdAt: -1 });

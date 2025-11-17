@@ -1,7 +1,8 @@
 const inventary = require("../models/inventary-model");
 const agentStock = require("../models/agent-stock-model"); 
 const cylinder = require("../models/cylinder-model");
-const Booking = require("../models/booking-model")
+const Booking = require("../models/booking-model");
+ const User = require('../models/user-model');
 const agentStockValidation = require("../validation/agent-stock-validation");
 const { Agent } = require("http");
 
@@ -261,7 +262,6 @@ agentStockCtrl.getStats = async (req, res) => {
   if (!agentId) {
     return res.status(401).json({ error: "Agent ID not found" });
   }
-
   try {
     const stocks = await agentStock.find({ agentId }).populate("cylinderId", "price");
     
@@ -316,10 +316,10 @@ agentStockCtrl.getCustomerAgentCylinders = async (req, res) => {
     const userRole = req.role;
 
     if (userRole !== 'customer') {
-      return res.status(403).json({ error: 'Only customers can access this endpoint' });
+      return res.status(403).json({ error: 'access denied' });
     }
 
-    const User = require('../models/user-model');
+   
     const customer = await User.findById(customerId);
     
     if (!customer) {
@@ -335,7 +335,7 @@ agentStockCtrl.getCustomerAgentCylinders = async (req, res) => {
     
     const agentStocks = await agentStock.find({ 
       agentId: customer.agent,
-      quantity: { $gt: 0 } 
+      quantity: { number: 0 } 
     }).populate('cylinderId', 'cylinderName cylinderType weight price');
 
   
