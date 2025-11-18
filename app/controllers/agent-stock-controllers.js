@@ -4,7 +4,7 @@ const cylinder = require("../models/cylinder-model");
 const Booking = require("../models/booking-model");
  const User = require('../models/user-model');
 const agentStockValidation = require("../validation/agent-stock-validation");
-const { Agent } = require("http");
+
 
 const agentStockCtrl = {};
 
@@ -47,11 +47,11 @@ agentStockCtrl.addStock = async (req, res) => {
       });
       await agentStockDoc.save();
     }
-    await agentStockDoc.populate("cylinderId", "cylinderType weight price");
+    await agentStockDoc.populate("cylinderId", "cylinderName cylinderType weight price");
 
     const allAgentStock = await agentStock
       .find({ agentId })
-      .populate("cylinderId", "cylinderType weight price");
+      .populate("cylinderId", "cylinderName cylinderType weight price");
 
     res.status(201).json({
       message: "Stock assigned to agent successfully",
@@ -69,23 +69,15 @@ agentStockCtrl.addStock = async (req, res) => {
 
 agentStockCtrl.OwnStock = async(req,res) =>{
  
-  const agentId = req.params.id || req.UserId;
-  const authenticatedAgentId = req.UserId;     
-  
+  const agentId = req.params.id;
 
-  if (req.params.id && authenticatedAgentId.toString() !== agentId.toString()) {
-  }
-  
   try{
   
-    const finalAgentId = req.params.id || authenticatedAgentId;
-    
-  
-    const Ownstock = await agentStock.find({agentId: finalAgentId}) 
-      .populate("cylinderId","cylinderType weight price");            
+    const Ownstock = await agentStock.find({agentId}) 
+      .populate("cylinderId")
     
     if(Ownstock.length == 0 ){
-      return res.status(200).json({Ownstock: [], totalAmount: 0});
+      return res.status(200).json({Ownstock:[], totalAmount: 0});
     }
     
     const totalAmount = Ownstock.reduce((sum,s) => sum + (s.totalAmount || 0), 0);

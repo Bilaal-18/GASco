@@ -38,11 +38,11 @@ const agentStockSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
-    period: {
-      type: String,
-      enum: ["daily", "monthly"],
-      default: "daily"
-    },
+    // period: {
+    //   type: String,
+    //   enum: ["daily", "monthly"],
+    //   default: "daily"
+    //},
     lastUpdated: { type: Date, default: Date.now() },
   },
   { timestamps: true }
