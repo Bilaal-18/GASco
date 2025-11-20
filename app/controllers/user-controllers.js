@@ -508,4 +508,59 @@ userCtrl.agentCustomers = async (req, res) => {
   }
 };
 
+//! <--------------------SEARCH & PAGINATION IN ADMIN --------------------> !\\
+
+userCtrl.searchUsersByRole = async (req, res) => {
+  try {
+    const role = req.params.role;
+    const search = req.query.search || "";
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit) || 10);
+    const skip = (page - 1) * limit;
+
+    if (!["customer", "agent"].includes(role)) {
+      return res.status(400).json({ error: "Invalid role" });
+    }
+
+    const query = {
+      role,
+      ...(search && {
+        $or: [
+          { username: { $regex: search, $options: "i" } },
+          { email: { $regex: search, $options: "i" } },
+          { phoneNo: { $regex: search, $options: "i" } },
+        ],
+      }),
+    };
+
+    let usersQuery = user
+      .find(query)
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 });
+
+    if (role === "customer") {
+      usersQuery = usersQuery.populate("agent", "agentname username email phoneNo");
+    }
+
+    const [users, total] = await Promise.all([
+      usersQuery.lean(),
+      user.countDocuments(query),
+    ]);
+
+    res.status(200).json({
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      users,
+    });
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: "Search failed!" });
+  }
+};
+
+
+
  module.exports = userCtrl;

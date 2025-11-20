@@ -9,7 +9,6 @@ const agentStockCtrl = require('./app/controllers/agent-stock-controllers');
 const bookingCtrl = require("./app/controllers/booking-controllers");
 const gasRequestCtrl = require("./app/controllers/gas-request-controllers");
 const paymentCtrl = require("./app/controllers/payment-controllers");
-const agentPaymentCtrl = require("./app/controllers/agent-payment-controllers");
 const uploadCtrl = require("./app/controllers/upload-controllers");
 const homeCtrl = require("./app/controllers/home-controllers");
 const translationCtrl = require("./app/controllers/translation-controllers");
@@ -50,7 +49,9 @@ app.put("/api/updatePassword/:id",authenticateUser,userCtrl.UpdatePassword);
 app.put("/api/updateAgent/:id",authenticateUser,authorizeUser(["admin","agent"]),userCtrl.updateAgent);
 app.put("/api/updateCustomer/:id",authenticateUser,authorizeUser("admin"),userCtrl.updateCustomer);
 app.delete("/api/removeAgent/:id",authenticateUser,userCtrl.removeAgent);
-app.delete("/api/remove/:id",authenticateUser,authorizeUser("admin"),userCtrl.remove)
+app.delete("/api/remove/:id",authenticateUser,authorizeUser("admin"),userCtrl.remove);
+app.get("/api/search/:role", authenticateUser,authorizeUser("admin"),userCtrl.searchUsersByRole);
+
 
 //! <-------------------- CYLINDER CONTROLLERS--------------------> !\\
 
@@ -99,22 +100,19 @@ app.patch("/api/cancelBooking/:id",authenticateUser,authorizeUser(["agent","cust
 app.delete("/api/deleteBooking/:id",authenticateUser,authorizeUser(["agent","customer"]),bookingCtrl.deleteBooking);
 app.get("/api/todayBookings",authenticateUser,authorizeUser("agent"),bookingCtrl.getToday);
 
-//! <--------------------PAYMENT CONTROLLERS--------------------> !\\
+//! <--------------------UNIFIED PAYMENT CONTROLLERS--------------------> !\\
 
 app.post("/api/payment/create-order",authenticateUser,authorizeUser(["customer","agent"]),paymentCtrl.createRazorpayOrder);
 app.post("/api/payment/verify",authenticateUser,authorizeUser(["customer","agent"]),paymentCtrl.verifyPayment);
+app.post("/api/payment/cash",authenticateUser,authorizeUser(["customer","agent"]),paymentCtrl.createCashPayment);
 app.get("/api/payment/history",authenticateUser,authorizeUser(["customer","agent","admin"]),paymentCtrl.getPaymentHistory);
 app.get("/api/payment/:id",authenticateUser,authorizeUser(["customer","agent","admin"]),paymentCtrl.getPaymentById);
 
-//! <--------------------AGENT PAYMENT CONTROLLERS--------------------> !\\
+//! <--------------------ADMIN AGENT PAYMENT CONTROLLERS--------------------> !\\
 
-app.post("/api/agent/payment/create-order",authenticateUser,authorizeUser("agent"),agentPaymentCtrl.createRazorpayOrder);
-app.post("/api/agent/payment/verify",authenticateUser,authorizeUser("agent"),agentPaymentCtrl.verifyPayment);
-app.post("/api/agent/payment/cash",authenticateUser,authorizeUser("agent"),agentPaymentCtrl.createCashPayment);
-app.get("/api/agent/payment/history",authenticateUser,authorizeUser("agent"),agentPaymentCtrl.getAgentPaymentHistory);
-app.get("/api/admin/agent-payments",authenticateUser,authorizeUser("admin"),agentPaymentCtrl.getAllAgentPayments);
-app.post("/api/admin/agent-payments/cash",authenticateUser,authorizeUser("admin"),agentPaymentCtrl.createCashPaymentByAdmin);
-app.put("/api/admin/agent-payments/:paymentId/cash-paid",authenticateUser,authorizeUser("admin"),agentPaymentCtrl.updateCashPaid);
+app.get("/api/admin/agent-payments",authenticateUser,authorizeUser("admin"),paymentCtrl.getAllAgentPayments);
+app.post("/api/admin/agent-payments/cash",authenticateUser,authorizeUser("admin"),paymentCtrl.createCashPaymentByAdmin);
+app.put("/api/admin/agent-payments/:paymentId/cash-paid",authenticateUser,authorizeUser("admin"),paymentCtrl.updateCashPaid);
 
 //! <--------------------UPLOAD CONTROLLERS--------------------> !\\
 
