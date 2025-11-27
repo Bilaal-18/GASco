@@ -32,13 +32,21 @@ async function exportAgentHistory(agentId, daysBack = 90) {
     console.log(`Found ${bookings.length} active bookings for agent ${agentId} in date range`);
 
     const dailyDemand = {};
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     
     bookings.forEach(booking => {
       if (booking.status === 'cancelled') {
         return;
       }
+      
       let bookingDate;
-      if (booking.deliveryDate) {
+      const createdAtDate = booking.createdAt ? new Date(booking.createdAt) : null;
+      const isCreatedToday = createdAtDate && createdAtDate.toDateString() === today.toDateString();
+      
+      if (isCreatedToday) {
+        bookingDate = booking.createdAt;
+      } else if (booking.deliveryDate) {
         bookingDate = booking.deliveryDate;
       } else if (booking.status === 'delivered' && booking.updatedAt) {
         bookingDate = booking.updatedAt;

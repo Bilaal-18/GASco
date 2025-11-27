@@ -13,7 +13,6 @@ const uploadCtrl = require("./app/controllers/upload-controllers");
 const homeCtrl = require("./app/controllers/home-controllers");
 const translationCtrl = require("./app/controllers/translation-controllers");
 const forecastCtrl = require("./app/controllers/forecast-controllers");
-const customerForecastCtrl = require("./app/controllers/customer-forecast-controllers");
 const { startForecastCron } = require("./app/cron/forecastCron");
 const fileUpload = require('express-fileupload');
 
@@ -100,7 +99,7 @@ app.patch("/api/cancelBooking/:id",authenticateUser,authorizeUser(["agent","cust
 app.delete("/api/deleteBooking/:id",authenticateUser,authorizeUser(["agent","customer"]),bookingCtrl.deleteBooking);
 app.get("/api/todayBookings",authenticateUser,authorizeUser("agent"),bookingCtrl.getToday);
 
-//! <--------------------UNIFIED PAYMENT CONTROLLERS--------------------> !\\
+//! <--------------------PAYMENT CONTROLLERS--------------------> !\\
 
 app.post("/api/payment/create-order",authenticateUser,authorizeUser(["customer","agent"]),paymentCtrl.createRazorpayOrder);
 app.post("/api/payment/verify",authenticateUser,authorizeUser(["customer","agent"]),paymentCtrl.verifyPayment);
@@ -132,7 +131,6 @@ app.post("/api/translate/detect",authenticateUser,translationCtrl.detectManglish
 
 //! <--------------------FORECAST ROUTES--------------------> !\\
   app.get("/api/agents/:agentId/forecast/stats", authenticateUser, authorizeUser(["admin","agent"]), forecastCtrl.getAgentForecastStats);
-  app.get("/api/agents/:agentId/customers/forecasts", authenticateUser, authorizeUser(["admin","agent"]), customerForecastCtrl.getAgentCustomersForecasts);  
   app.get("/api/agents/:agentId/forecast", authenticateUser, authorizeUser(["admin","agent"]), forecastCtrl.getAgentForecast);
 
 
@@ -140,9 +138,18 @@ app.listen(port,() => {
     console.log("sever running in port",port);
     
     
-    // setTimeout(() => {
-    //     startForecastCron();
-    // }, 3000);
-    console.log("Forecast cron job is disabled. Use refresh button to generate forecasts on-demand.");
+    // Forecast cron job is disabled by default
+    // To enable automatic forecast generation, uncomment the line below:
+    // setTimeout(() => { startForecastCron(); }, 3000);
+    
+    // Check if Gemini API key is configured
+    if (!process.env.GEMINI_API_KEY) {
+        console.warn("⚠️  WARNING: GEMINI_API_KEY is not set. Forecast generation will not work.");
+        console.warn("⚠️  Please set GEMINI_API_KEY in your environment variables for forecast functionality.");
+    } else {
+        console.log("✅ GEMINI_API_KEY is configured. Forecast service is ready.");
+    }
+    
+    console.log("ℹ️  Forecast cron job is disabled. Use refresh button to generate forecasts on-demand.");
 });
 

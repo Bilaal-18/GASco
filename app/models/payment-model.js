@@ -6,6 +6,7 @@ const paymentSchema = new mongoose.Schema({
         enum: ['customer', 'agent'],
         required: true,
     },
+    
     customer: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'user',
@@ -18,14 +19,17 @@ const paymentSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'user',
     },
+    
     booking: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'booking',
     },
+    
     stockIds: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'agentStock',
     }],
+    
     amount: {
         type: Number,
         required: true,
@@ -33,14 +37,15 @@ const paymentSchema = new mongoose.Schema({
     },
     method: {
         type: String,
-        enum: ['cash', 'online', 'upi'],
+        enum: ['cash', 'online'],
         required: true,
     },
     status: {
         type: String,
-        enum: ['pending', 'completed', 'failed', 'refunded', 'partial'],
-        default: 'pending',
+        enum: ['pending', 'completed', 'failed', 'partial'],
+        default: 'completed',
     },
+    
     transactionID: {
         type: String,
         required: true,
@@ -49,12 +54,14 @@ const paymentSchema = new mongoose.Schema({
         type: Date,
         default: Date.now,
     },
+    
     description: {
         type: String,
     },
     notes: {
         type: String,
     },
+    
     onlinePaid: {
         type: Number,
         default: 0,
@@ -72,7 +79,7 @@ const paymentSchema = new mongoose.Schema({
         default: 0,
     }
 }, {
-    timestamps: true
+    timestamps: true 
 });
 
 paymentSchema.index({ customer: 1, paymentType: 1 });
@@ -80,5 +87,5 @@ paymentSchema.index({ agent: 1, paymentType: 1 });
 paymentSchema.index({ booking: 1 });
 paymentSchema.index({ transactionID: 1 });
 
-const payment = mongoose.model('payment', paymentSchema);
-module.exports = payment;
+const Payment = mongoose.model('payment', paymentSchema);
+module.exports = Payment;

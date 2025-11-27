@@ -6,7 +6,6 @@ const AgentStock = require("../models/agent-stock-model");
 const User = require("../models/user-model");
 require("dotenv").config();
 
-// Initialize Razorpay instance
 const razorpay = new Razorpay({
     key_id: process.env.RAZORPAY_KEY_ID,
     key_secret: process.env.RAZORPAY_KEY_SECRET,
@@ -15,26 +14,21 @@ const razorpay = new Razorpay({
 const paymentController = {};
 
 //! -------------------- CREATE RAZORPAY ORDER -------------------- //
-// Works for both customer and agent payments
+
 paymentController.createRazorpayOrder = async (req, res) => {
-    console.log("Payment creation endpoint hit");
     try {
         const { amount, bookingId, paymentType, description } = req.body;
         const userId = req.UserId;
         const userRole = req.role;
         
-        console.log("Request body:", { amount, bookingId, paymentType, userRole });
-
         if (!amount) {
             return res.status(400).json({ error: "Missing required fields: amount" });
         }
 
-        // Ensure amount is positive
         if (amount <= 0) {
             return res.status(400).json({ error: "Amount must be greater than zero" });
         }
 
-        // Determine payment type from role if not provided
         let finalPaymentType = paymentType;
         if (!finalPaymentType) {
             if (userRole === 'agent') {
@@ -46,23 +40,17 @@ paymentController.createRazorpayOrder = async (req, res) => {
             }
         }
 
-        // Validate bookingId for customer payments
         if (finalPaymentType === 'customer' && !bookingId) {
             return res.status(400).json({ error: "Booking ID is required for customer payments" });
         }
 
-        console.log("Creating Razorpay Order...");
-
         const order = await razorpay.orders.create({
-            amount: amount * 100, // Convert to paise
+            amount: amount * 100,
             currency: "INR",
             receipt: `receipt_${Date.now()}_${finalPaymentType}`,
         });
 
-        console.log("Razorpay Order Response:", order);
-
         if (!order || !order.id) {
-            console.error("Error: Order ID is missing in the Razorpay response");
             return res.status(500).json({
                 error: "Failed to create Razorpay order. Order ID is missing",
             });
@@ -72,7 +60,7 @@ paymentController.createRazorpayOrder = async (req, res) => {
 
         res.json({
             orderId: order.id,
-            key: process.env.RAZORPAY_KEY_ID,
+           // key: process.env.RAZORPAY_KEY_ID,
             amount: order.amount,
             currency: order.currency,
         });
@@ -83,7 +71,7 @@ paymentController.createRazorpayOrder = async (req, res) => {
 };
 
 //! -------------------- VERIFY RAZORPAY PAYMENT -------------------- //
-// Works for both customer and agent payments
+
 paymentController.verifyPayment = async (req, res) => {
     try {
         const {
@@ -93,7 +81,7 @@ paymentController.verifyPayment = async (req, res) => {
             bookingId,
             paymentType,
             amount,
-            totalDue, // For agent payments
+            totalDue,
             description,
         } = req.body;
 
@@ -104,7 +92,6 @@ paymentController.verifyPayment = async (req, res) => {
             return res.status(400).json({ error: "Missing payment verification data" });
         }
 
-        // Verify signature
         const body = razorpay_order_id + "|" + razorpay_payment_id;
         const expectedSignature = crypto
             .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
@@ -118,7 +105,6 @@ paymentController.verifyPayment = async (req, res) => {
             });
         }
 
-        // Determine payment type
         let finalPaymentType = paymentType;
         if (!finalPaymentType) {
             if (userRole === 'agent') {
@@ -128,19 +114,17 @@ paymentController.verifyPayment = async (req, res) => {
             }
         }
 
-        // Create payment record (only store transaction ID and amount, not Razorpay details)
         const paymentData = {
             paymentType: finalPaymentType,
             amount: Number(amount) || 0,
             method: 'online',
             status: 'completed',
-            transactionID: razorpay_payment_id, // Use Razorpay payment ID as transaction ID
+            transactionID: razorpay_payment_id,
             paymentDate: new Date(),
             description: description || `Online payment via Razorpay`,
         };
 
         if (finalPaymentType === 'customer') {
-            // Customer payment
             if (!bookingId) {
                 return res.status(400).json({ error: "Booking ID is required for customer payments" });
             }
@@ -154,12 +138,10 @@ paymentController.verifyPayment = async (req, res) => {
             paymentData.booking = bookingId;
             paymentData.agent = booking.agent || null;
 
-            // Update booking payment status
             booking.paymentStatus = 'paid';
             await booking.save();
 
         } else if (finalPaymentType === 'agent') {
-            // Agent payment to admin
             const admin = await User.findOne({ role: 'admin' });
             if (!admin) {
                 return res.status(404).json({ error: "Admin not found" });
@@ -170,7 +152,6 @@ paymentController.verifyPayment = async (req, res) => {
             paymentData.onlinePaid = Number(amount) || 0;
             paymentData.cashPaid = 0;
             
-            // Calculate total due if not provided
             let calculatedTotalDue = Number(totalDue) || 0;
             if (!totalDue || calculatedTotalDue === 0) {
                 const unpaidStocks = await AgentStock.find({
@@ -183,7 +164,6 @@ paymentController.verifyPayment = async (req, res) => {
             paymentData.totalDue = calculatedTotalDue;
             paymentData.remainingCash = Math.max(0, calculatedTotalDue - (Number(amount) || 0));
 
-            // Update agent stock payment status
             const unpaidStocks = await AgentStock.find({
                 agentId: userId,
                 paymentStatus: 'pending'
@@ -210,12 +190,17 @@ paymentController.verifyPayment = async (req, res) => {
         const payment = new Payment(paymentData);
         await payment.save();
 
-        // Populate payment data
         const populatedPayment = await Payment.findById(payment._id)
             .populate('customer', 'username email phoneNo')
             .populate('agent', 'agentname username email phoneNo')
             .populate('admin', 'username email')
-            .populate('booking')
+            .populate({
+                path: 'booking',
+                populate: {
+                    path: 'cylinder',
+                    select: 'cylinderName cylinderType weight price'
+                }
+            })
             .populate('stockIds');
 
         res.json({
@@ -244,7 +229,6 @@ paymentController.createCashPayment = async (req, res) => {
             return res.status(400).json({ error: "Valid amount is required" });
         }
 
-        // Determine payment type
         let finalPaymentType = paymentType;
         if (!finalPaymentType) {
             if (userRole === 'agent') {
@@ -295,7 +279,6 @@ paymentController.createCashPayment = async (req, res) => {
             paymentData.totalDue = Number(totalDue) || 0;
             paymentData.remainingCash = Math.max(0, (Number(totalDue) || 0) - Number(amount));
 
-            // Update agent stock payment status
             const unpaidStocks = await AgentStock.find({
                 agentId: userId,
                 paymentStatus: 'pending'
@@ -326,7 +309,13 @@ paymentController.createCashPayment = async (req, res) => {
             .populate('customer', 'username email phoneNo')
             .populate('agent', 'agentname username email phoneNo')
             .populate('admin', 'username email')
-            .populate('booking')
+            .populate({
+                path: 'booking',
+                populate: {
+                    path: 'cylinder',
+                    select: 'cylinderName cylinderType weight price'
+                }
+            })
             .populate('stockIds');
 
         res.status(201).json({
@@ -351,7 +340,6 @@ paymentController.getPaymentHistory = async (req, res) => {
         if (userRole === 'customer') {
             query = { customer: userId, paymentType: 'customer' };
         } else if (userRole === 'agent') {
-            // Agent can see both their payments to admin and customer payments they processed
             if (paymentType === 'agent') {
                 query = { agent: userId, paymentType: 'agent' };
             } else if (paymentType === 'customer') {
@@ -363,7 +351,6 @@ paymentController.getPaymentHistory = async (req, res) => {
                 ]};
             }
         } else if (userRole === 'admin') {
-            // Admin can see all payments
             if (paymentType) {
                 query = { paymentType };
             }
@@ -373,11 +360,16 @@ paymentController.getPaymentHistory = async (req, res) => {
             .populate('customer', 'username email phoneNo')
             .populate('agent', 'agentname username email phoneNo')
             .populate('admin', 'username email')
-            .populate('booking')
+            .populate({
+                path: 'booking',
+                populate: {
+                    path: 'cylinder',
+                    select: 'cylinderName cylinderType weight price'
+                }
+            })
             .populate('stockIds')
             .sort({ createdAt: -1 });
 
-        // For agent payments, include stock info
         let stockInfo = null;
         if (userRole === 'agent' && paymentType === 'agent') {
             const stocks = await AgentStock.find({ agentId: userId })
@@ -426,14 +418,19 @@ paymentController.getPaymentById = async (req, res) => {
             .populate('customer', 'username email phoneNo')
             .populate('agent', 'agentname username email phoneNo')
             .populate('admin', 'username email')
-            .populate('booking')
+            .populate({
+                path: 'booking',
+                populate: {
+                    path: 'cylinder',
+                    select: 'cylinderName cylinderType weight price'
+                }
+            })
             .populate('stockIds');
 
         if (!payment) {
             return res.status(404).json({ error: "Payment not found" });
         }
 
-        // Check authorization
         if (userRole === 'customer' && payment.customer?._id?.toString() !== userId) {
             return res.status(403).json({ error: "Unauthorized access" });
         }
