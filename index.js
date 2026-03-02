@@ -136,20 +136,5 @@ app.post("/api/translate/detect",authenticateUser,translationCtrl.detectManglish
 
 app.listen(port,() => {
     console.log("sever running in port",port);
-    
-    
-    // Forecast cron job is disabled by default
-    // To enable automatic forecast generation, uncomment the line below:
-    // setTimeout(() => { startForecastCron(); }, 3000);
-    
-    // Check if Gemini API key is configured
-    if (!process.env.GEMINI_API_KEY) {
-        console.warn("⚠️  WARNING: GEMINI_API_KEY is not set. Forecast generation will not work.");
-        console.warn("⚠️  Please set GEMINI_API_KEY in your environment variables for forecast functionality.");
-    } else {
-        console.log("✅ GEMINI_API_KEY is configured. Forecast service is ready.");
-    }
-    
-    console.log("ℹ️  Forecast cron job is disabled. Use refresh button to generate forecasts on-demand.");
 });
 
